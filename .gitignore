@@ -1,8 +1,12 @@
 ./data
 ./figures
 ./idea
+<<<<<<< HEAD
 
 # Windows
 /data/
 /figures/
 /idea/
+=======
+*.pyc
+>>>>>>> d29e44455e5f097a4fd2781a84ca3f83efb6cb71
