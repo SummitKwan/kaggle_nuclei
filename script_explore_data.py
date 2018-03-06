@@ -1,11 +1,46 @@
 """ script to understand data stucrure """
 
 import os
+import warnings
+import urllib
+import zipfile
+
 import numpy as np
 import scipy as sp
 import scipy.ndimage as ndimage
 import matplotlib.pyplot as plt
 
+
+
+""" download data """
+data_urls = [
+    'https://www.kaggle.com/c/8089/download/stage1_train.zip',
+    'https://www.kaggle.com/c/8089/download/stage1_train_labels.csv.zip',
+    'https://www.kaggle.com/c/8089/download/stage1_test.zip',
+    'https://www.kaggle.com/c/8089/download/stage1_sample_submission.csv.zip'
+    ]
+
+path_data = './data'
+if not os.path.isdir(path_data):
+    os.makedirs(path_data)
+
+
+
+for data_url in data_urls:
+    data_file_zip = os.path.basename(data_url)
+    if data_file_zip not in os.listdir(path_data):
+        warnings.warn('please download data file {} manually to {}'.format(data_url, path_data))
+        break
+        # the line below does not work, since kaggle needs username and password
+        # urllib.request.urlretrieve(data_url, os.path.join(path_data, data_file_zip))
+    data_file_unzip = data_file_zip[:-4]
+    if '.' in data_file_unzip:
+        path_extract = path_data
+    else:
+        path_extract = os.path.join(path_data, data_file_unzip)
+    if data_file_zip in os.listdir(path_data) and data_file_unzip not in os.listdir(path_data):
+        zipfile.ZipFile(os.path.join(path_data, data_file_zip), 'r')\
+            .extractall(path_extract)
 
 """ understand the data folder structure """
 # get image names
@@ -68,13 +103,14 @@ plt.axis('off')
 plt.axes(h_ax[1])
 plt.imshow(img)
 list_mask_colors = np.random.rand(len(masks), 3)
-list_mask_colors = np.append(list_mask_colors, [[0.5]]*len(masks), axis=1)
+list_mask_colors = np.append(list_mask_colors, [[0.9]]*len(masks), axis=1)
 for i in range(len(masks)):
     mask = masks[i]
     mask_to_plot = (mask[:, :, None]*list_mask_colors[i][None, None, :]).astype('uint8')
     plt.imshow(mask_to_plot)
 plt.axis('off')
 plt.title(img.shape)
+
 
 
 
