@@ -7,6 +7,7 @@ import os
 import sys
 import random
 import warnings
+import time
 
 import numpy as np
 import pandas as pd
@@ -58,6 +59,7 @@ test_ids = next(os.walk(TEST_PATH))[1]
 # Get and resize train images and masks
 X_train = np.zeros((len(train_ids), IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), dtype=np.uint8)
 Y_train = np.zeros((len(train_ids), IMG_HEIGHT, IMG_WIDTH, 1), dtype=np.bool)
+Y_train_label = np.zeros((len(train_ids), IMG_HEIGHT, IMG_WIDTH, 1), dtype='uint16')
 print('Getting and resizing train images and masks ... ')
 sys.stdout.flush()
 for n, id_ in tqdm(enumerate(train_ids), total=len(train_ids)):
@@ -66,12 +68,17 @@ for n, id_ in tqdm(enumerate(train_ids), total=len(train_ids)):
     img = resize(img, (IMG_HEIGHT, IMG_WIDTH), mode='constant', preserve_range=True)
     X_train[n] = img
     mask = np.zeros((IMG_HEIGHT, IMG_WIDTH, 1), dtype=np.bool)
+    mask_label = np.zeros((IMG_HEIGHT, IMG_WIDTH, 1), dtype='uint16')
+    i_label = 1
     for mask_file in next(os.walk(path + '/masks/'))[2]:
         mask_ = imread(path + '/masks/' + mask_file)
         mask_ = np.expand_dims(resize(mask_, (IMG_HEIGHT, IMG_WIDTH), mode='constant',
                                       preserve_range=True), axis=-1)
         mask = np.maximum(mask, mask_)
+        mask_label[mask_>0] = i_label
+        i_label += 1
     Y_train[n] = mask
+    Y_train_label[n] = mask_label
 
 # Get and resize test images
 X_test = np.zeros((len(test_ids), IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), dtype=np.uint8)
@@ -219,3 +226,40 @@ imshow(np.squeeze(preds_val_t[ix]))
 plt.show()
 
 
+
+""" performance score """
+
+list_score = []
+for i_image in tqdm(range(len(preds_train_t))):
+    image = X_train[i_image]
+    mask_true = Y_train_label[i_image,:,:,0]
+    mask_pred = utils.segment_mask(preds_train_t[i_image, :, :, 0])
+    IOU = utils.cal_prediction_IOU(mask_true, mask_pred)
+    score = utils.cal_score_from_IOU(IOU)['ave']
+    list_score.append(score)
+
+
+""" examine test data segmentation """
+import pickle
+with open('./data/data_test.pickle', 'rb') as f:
+    data_test = pickle.load(f)
+
+
+""" gen result to submit """
+test_runline = {}
+for i_test, test_id in enumerate(test_ids):
+    masks_cur = utils.segment_mask(preds_test_upsampled[i_test] > 0.5)
+    masks_size = []
+    for mask_index in range(1, masks_cur.max()+1):
+
+
+
+utils.plot_img_and_mask_from_dict(data_test, id_to_plot=list(data_test.keys())[5])
+
+
+plt.subplot(1,3,1)
+plt.imshow(image)
+plt.subplot(1,3,2)
+plt.imshow(mask_true)
+plt.subplot(1,3,3)
+plt.imshow(mask_pred)

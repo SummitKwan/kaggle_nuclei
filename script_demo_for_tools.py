@@ -2,11 +2,12 @@
 
 ##
 import importlib
-import utils
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-importlib.reload(utils)
+
+from . import utils
+
 
 
 

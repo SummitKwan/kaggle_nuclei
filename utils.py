@@ -257,17 +257,29 @@ def cal_prediction_IOU(mask_true, mask_pred):
     :param mask_pred: np.array(shape=[H, W], dtype='int'), where every number is the label of that pixel
     :return: np.array(shape=[num_unique_labels_true, num_unique_labels_pred], dtype='float')
     """
-    mask_true = mask_true.astype('int')
-    mask_pred = mask_pred.astype('int')
-    n_true = mask_true.max()
-    n_pred = mask_pred.max()
-    IOU_all = np.zeros([n_true, n_pred])
-    for i in range(n_true):
-        for j in range(n_pred):
-            mask_true_cur = mask_true == i + 1
-            mask_pred_cur = mask_pred == j + 1
-            IOU_all[i, j] = np.sum((mask_true_cur & mask_pred_cur)).astype('float') \
-                            / np.sum((mask_true_cur | mask_pred_cur))
+    mask_true = mask_true.astype('int').ravel()
+    mask_pred = mask_pred.astype('int').ravel()
+    mask_true_unq = np.unique(mask_true[mask_true>0])
+    mask_pred_unq = np.unique(mask_pred[mask_pred>0])
+    indx_mask_true = [np.where(mask_true == label)[0] for label in mask_true_unq]
+    indx_mask_pred = [np.where(mask_pred == label)[0] for label in mask_pred_unq]
+    IOU_all = np.zeros([len(indx_mask_true), len(indx_mask_pred)], dtype='float')
+    for i, indx_true in enumerate(indx_mask_true):
+        for j, indx_pred in enumerate(indx_mask_pred):
+            if indx_true.min()>indx_pred.max() or indx_true.max()<indx_pred.min():
+                IOU_all[i, j] = 0.0
+            else:
+                IOU_all[i, j] = np.intersect1d(indx_true, indx_pred).size / np.union1d(indx_true, indx_pred).size
+
+    # n_true = mask_true.max()
+    # n_pred = mask_pred.max()
+    # IOU_all = np.zeros([n_true, n_pred])
+    # for i in range(n_true):
+    #     for j in range(n_pred):
+    #         mask_true_cur = mask_true == i + 1
+    #         mask_pred_cur = mask_pred == j + 1
+    #         IOU_all[i, j] = np.sum((mask_true_cur & mask_pred_cur)).astype('float') \
+    #                         / np.sum((mask_true_cur | mask_pred_cur))
     return IOU_all
 
 
@@ -290,5 +302,25 @@ def cal_score_from_IOU(IOU):
         nFP = np.sum(FP)
         score = 1.0*nTP / (nTP + nTN + nFP)
         list_score[i] = score
-    return {'ave': np.mean(list_score), 'all':list_score}
+    return {'ave': np.mean(list_score), 'all': list_score}
 
+
+
+def rle_encoding(mask):
+    '''
+    reline encoding of masks
+    mask: numpy array of shape (height, width), 1 - mask, 0 - background
+    Returns run length as list
+    '''
+    non_zeros = np.where(mask.T.flatten() > 0)[0]  # .T sets Fortran order down-then-right
+    non_zeros = non_zeros + 1   # the official site asks the result to be 1-indexed
+    run_lengths = []
+    for i in range(len(non_zeros)):
+        if i==0 or non_zeros[i]-non_zeros[i-1] > 1:
+            start = non_zeros[i]
+            count = 1
+            run_lengths.append(start)
+            run_lengths.append(count)
+        elif non_zeros[i]-non_zeros[i-1] == 1:
+            run_lengths[-1] += 1
+    return run_lengths
