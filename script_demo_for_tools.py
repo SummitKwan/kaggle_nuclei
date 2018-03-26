@@ -107,4 +107,33 @@ plt.axis('off')
 
 """ ----- 3.2 compute IOU and score """
 IOU = utils.cal_prediction_IOU(mask_true, mask_seg)
-score_ave, score_all = utils.cal_score_from_IOU(IOU)
+score = utils.cal_score_from_IOU(IOU)
+print(score)
+
+
+""" ========== 4. image split and stitch ========== """
+
+# ----- 4.1 image split
+id_eg = np.random.choice(list(data_tr.keys()))
+image = data_tr[id_eg]['image']
+mask_true = data_tr[id_eg]['mask']
+
+# full image
+plt.figure()
+utils.plot_img_and_mask_from_dict(data_tr, id_eg)
+
+# split image segments
+img_seg = utils.img_split(image, size_seg=128, overlap=0.2)
+img_seg_start = np.array(list(img_seg.keys()))
+rs_start = np.unique(img_seg_start[:, 0])
+cs_start = np.unique(img_seg_start[:, 1])
+h_fig, h_axes = plt.subplots(len(rs_start), len(cs_start))
+for i_r, r in enumerate(rs_start):
+    for i_c, c in enumerate(cs_start):
+        plt.axes(h_axes[i_r, i_c])
+        plt.imshow(img_seg[(r, c)])
+        plt.axis('off')
+        plt.title((r, c), fontsize='x-small')
+
+
+

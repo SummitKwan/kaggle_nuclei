@@ -4,6 +4,7 @@ import os
 import warnings
 import zipfile
 import pickle
+import random
 
 from tqdm import tqdm
 import numpy as np
@@ -207,7 +208,7 @@ def plot_img_and_mask_from_dict(dict_data, id_to_plot=None):
     """ plot data from the defined data structure """
 
     if id_to_plot is None:
-        id_to_plot = np.random.choice(list(dict_data.keys()))
+        id_to_plot = random.choice(list(dict_data.keys()))
     elif id_to_plot not in dict_data:
         warnings.warn('given id does not exist in the data, id={}'.format(id_to_plot))
         return None
@@ -237,7 +238,7 @@ def plot_img_and_mask_from_dict(dict_data, id_to_plot=None):
         plt.title(masks.max(), fontsize='x-small')
 
 
-""" ========== performance evaluation ========== """
+""" ========== image manipulation  ========== """
 
 def segment_mask(mask_unlabeled):
     """
@@ -247,6 +248,36 @@ def segment_mask(mask_unlabeled):
     :return: labeled mask, int array, where 0 is background, and 1,2,3... is labels
     """
     return ndimage.label(mask_unlabeled)[0]
+
+
+def mask_stack(mask_2D):
+    """ represent masks in np.array(shape=(N, M, num_masks)), where values are either 0 or 1 """
+    labels_mask = np.unique(mask_2D)
+    labels_mask = labels_mask[labels_mask>0]
+    n, m = mask_2D.shape
+    k = len(labels_mask)
+    mask_3D = np.zeros(shape=(n, m, k), dtype='uint8')
+    for i_label, label in enumerate(labels_mask):
+        mask_3D[:, :, i_label] = (mask_2D == label)
+    return mask_3D
+
+
+def mask_destack(mask_3D, labels=None):
+    """ represent masks in np.array(shape=(N, M)), where values range from 0 to number_masks, coding labels """
+
+    """ in case of overlapping masks, the mask with small label index overwrites the one with larger label index """
+    n, m, k = mask_3D.shape
+    mask_2D = np.zeros(shape=(n, m), dtype='uint16')
+    if labels is None:
+        labels = range(k)
+    i_labels = np.argsort(labels)
+    for i in i_labels[::-1]:
+        mask_2D[mask_3D[:, :, i]>0] = i+1
+    return mask_2D
+
+
+
+""" ========== performance evaluation ========== """
 
 
 def cal_prediction_IOU(mask_true, mask_pred):
@@ -324,3 +355,64 @@ def rle_encoding(mask):
         elif non_zeros[i]-non_zeros[i-1] == 1:
             run_lengths[-1] += 1
     return run_lengths
+
+
+""" ========== image split and stitch ========== """
+
+
+def cal_img_split_start_index(img, size_seg=128, overlap=0.2):
+    """
+     split image to small segments, returns t
+
+    :param img:      input image (shape=(m, m, k)) or size of image (m, n)
+    :param size_seg: size of small segments, (length of square in pixels)
+    :param overlap:  minimal proportion of overlap between neighboring segments (in 1D)
+    :return:         (starting_indexes_of_rows, starting_indexes_of_columns)
+    """
+
+    if np.array(img).size <= 3:
+        m, n = img[:2]
+    else:
+        m, n = img.shape[:2]
+
+    def cal_split_start_index(size_img, size_seg):
+        """ cal 1D split, returns the starting index of every segment """
+        if size_img < size_seg:
+            res_split = np.array([0])
+        else:
+            num_split_r, rem = divmod((size_img-size_seg), (int(size_seg*(1-overlap))))
+            num_split_r = num_split_r + (rem > 0)
+            res_split = np.linspace(0, size_img-size_seg, num_split_r+1).astype('int')
+        return res_split
+
+    r_split = cal_split_start_index(m, size_seg)
+    c_split = cal_split_start_index(n, size_seg)
+
+    return r_split, c_split
+
+
+def img_split(img, size_seg=128, overlap=0.2):
+    """
+    split image to small segments of size<=size_seg and overlapping_proportion>=overlap
+
+    :param img:      input image (shape=(m, m, k)) or size of image (m, n)
+    :param size_seg: size of small segments, (length of square in pixels)
+    :param overlap:  minimal proportion of overlap between neighboring segments (in 1D)
+    :return:         [list_of_images]
+    """
+
+    r_split, c_split = cal_img_split_start_index(img, size_seg, overlap)
+    segment_starting_index = []
+    segment_img = []
+    for r in r_split:
+        for c in c_split:
+            segment_starting_index.append((r, c))
+            segment_img.append(img[r:r+size_seg, c:c+size_seg])
+    return dict(zip(segment_starting_index, segment_img))
+
+
+
+
+
+
+
