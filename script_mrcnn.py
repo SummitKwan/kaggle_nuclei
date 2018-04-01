@@ -46,17 +46,49 @@ with open('./data/data_test.pickle', 'rb') as f:
 
 
 """ prepare data for training """
-yn_create_train_seg = False
+yn_create_train_seg = True
+yn_use_aug = True
 
 if yn_create_train_seg:
+
+    if yn_use_aug:
+        data_train_aug = {}
+        for id_img in data_train.keys():
+            data_train_aug[id_img + '_o0'] = {}
+            data_train_aug[id_img + '_o0']['image'] = data_train[id_img]['image']
+            data_train_aug[id_img + '_o0']['mask'] = data_train[id_img]['mask']
+            data_train_aug[id_img + '_o1'] = {}
+            data_train_aug[id_img + '_o1']['image'] = np.rot90(data_train[id_img]['image'], 1)
+            data_train_aug[id_img + '_o1']['mask'] = np.rot90(data_train[id_img]['mask'], 1)
+            data_train_aug[id_img + '_o2'] = {}
+            data_train_aug[id_img + '_o2']['image'] = np.rot90(data_train[id_img]['image'], 2)
+            data_train_aug[id_img + '_o2']['mask'] = np.rot90(data_train[id_img]['mask'], 2)
+            data_train_aug[id_img + '_o3'] = {}
+            data_train_aug[id_img + '_o3']['image'] = np.rot90(data_train[id_img]['image'], 3)
+            data_train_aug[id_img + '_o3']['mask'] = np.rot90(data_train[id_img]['mask'], 3)
+            data_train_aug[id_img + '_o4'] = {}
+            data_train_aug[id_img + '_o4']['image'] = np.fliplr(data_train[id_img]['image'])
+            data_train_aug[id_img + '_o4']['mask'] = np.fliplr(data_train[id_img]['mask'])
+            data_train_aug[id_img + '_o5'] = {}
+            data_train_aug[id_img + '_o5']['image'] = np.rot90(np.fliplr(data_train[id_img]['image']), 1)
+            data_train_aug[id_img + '_o5']['mask'] = np.rot90(np.fliplr(data_train[id_img]['mask']), 1)
+            data_train_aug[id_img + '_o6'] = {}
+            data_train_aug[id_img + '_o6']['image'] = np.rot90(np.fliplr(data_train[id_img]['image']), 2)
+            data_train_aug[id_img + '_o6']['mask'] = np.rot90(np.fliplr(data_train[id_img]['mask']), 2)
+            data_train_aug[id_img + '_o7'] = {}
+            data_train_aug[id_img + '_o7']['image'] = np.rot90(np.fliplr(data_train[id_img]['image']), 3)
+            data_train_aug[id_img + '_o7']['mask'] = np.rot90(np.fliplr(data_train[id_img]['mask']), 3)
+        data_train_selection = data_train_aug
+    else:
+        data_train_selection = data_train
+
     data_train_seg = {}
     # split every image so that the diameter of every nuclei takes 1/16 ~ 1/8 of the image length
     list_amplification = [8, 16]
-    # id_img = np.random.choice(list(data_train.keys()))
-    for id_img in data_train.keys():
-        img_cur  = data_train[id_img]['image']
-        mask_cur = data_train[id_img]['mask']
-        size_nuclei = int(np.mean(np.sqrt(np.sum(utils.mask_2Dto3D(data_train[id_img]['mask']), axis=(0, 1)))))
+    for id_img in tqdm(data_train_selection.keys()):
+        img_cur  = data_train_selection[id_img]['image']
+        mask_cur = data_train_selection[id_img]['mask']
+        size_nuclei = int(np.mean(np.sqrt(np.sum(utils.mask_2Dto3D(data_train_selection[id_img]['mask']), axis=(0, 1)))))
         for amplification in list_amplification:
             img_cur_seg  = utils.img_split(img=img_cur,  size_seg=size_nuclei * amplification)
             mask_cur_seg = utils.img_split(img=mask_cur, size_seg=size_nuclei * amplification)
@@ -65,15 +97,21 @@ if yn_create_train_seg:
                 data_train_seg[(id_img, start_loc, amplification)]['image'] = img_cur_seg[start_loc]
                 data_train_seg[(id_img, start_loc, amplification)]['mask'] = mask_cur_seg[start_loc]
 
-    # id_plot = random.choice(list(data_train_seg.keys()))
-    # print(id_plot)
-    # utils.plot_img_and_mask_from_dict(data_train_seg, id_plot)
+    if yn_use_aug:
+        with open('./data/data_train_aug_seg.pickle', 'wb') as f:
+            pickle.dump(data_train_seg, f)
+    else:
+        with open('./data/data_train_seg.pickle', 'wb') as f:
+            pickle.dump(data_train_seg, f)
 
-    with open('./data/data_train_seg.pickle', 'wb') as f:
-        pickle.dump(data_train_seg, f)
 else:
-    with open('./data/data_train_seg.pickle', 'rb') as f:
-        data_train_seg = pickle.load(f)
+    if yn_use_aug:
+        with open('./data/data_train_aug_seg.pickle', 'rb') as f:
+            data_train_seg = pickle.load(f)
+    else:
+        with open('./data/data_train_seg.pickle', 'rb') as f:
+            data_train_seg = pickle.load(f)
+
 
 """ create mrcnn class for using the model """
 
@@ -95,15 +133,15 @@ class NucleiConfig(mrcnn.config.Config):
 
     # Use small images for faster training. Set the limits of the small side
     # the large side, and that determines the image shape.
-    IMAGE_MIN_DIM = 128
-    IMAGE_MAX_DIM = 128
+    IMAGE_MIN_DIM = 256
+    IMAGE_MAX_DIM = 256
 
     # Use smaller anchors because our image and objects are small
     RPN_ANCHOR_SCALES = (4, 8, 16, 32, 64)  # anchor side in pixels
 
     # Reduce training ROIs per image because the images are small and have
     # few objects. Aim to allow ROI sampling to pick 33% positive ROIs.
-    TRAIN_ROIS_PER_IMAGE = 128
+    TRAIN_ROIS_PER_IMAGE = 64
 
     # Maximum number of ground truth instances to use in one image
     MAX_GT_INSTANCES = 128
@@ -132,55 +170,14 @@ class NucleiDataset(mrcnn.utils.Dataset):
 
     def load_image(self, image_id):
         return self.data_dict[self.image_info[image_id]['path']]['image']
-        # old code: resize
-        # img = self.data_dict[self.image_info[image_id]['path']]['image']
-        # old_size = img.shape[:2]  # old_size is in (height, width) format
-        # ratio = float(config.IMAGE_MAX_DIM) / max(old_size)
-        # new_size = tuple([int(x * ratio) for x in old_size])
-        # im = cv2.resize(img, (new_size[1], new_size[0]))
-        # delta_w = config.IMAGE_MAX_DIM - new_size[1]
-        # delta_h = config.IMAGE_MAX_DIM - new_size[0]
-        # top, bottom = delta_h // 2, delta_h - (delta_h // 2)
-        # left, right = delta_w // 2, delta_w - (delta_w // 2)
-        #
-        # color = [0, 0, 0]
-        # new_img = cv2.copyMakeBorder(im, top, bottom, left, right, cv2.BORDER_CONSTANT,
-        #                             value=color)
-        # return new_img
 
     def load_mask(self, image_id):
         mask_2D = self.data_dict[self.image_info[image_id]['path']]['mask']
-
         mask_3D = utils.mask_2Dto3D(mask_2D)
-        # label_unique = np.unique(mask_2D)
-        # label_unique = label_unique[label_unique > 0]
-        # if len(label_unique) > 0:
-        #     mask_3D = np.stack([mask_2D==label for label in label_unique], axis=2).astype('uint8')
-        #
-        # else:
-        #     mask_3D = np.zeros(shape=mask_2D.shape[:2]+(0, ))
 
         class_ids = np.ones(mask_3D.shape[2], dtype=np.int32)
         mask = mask_3D
 
-        # old code to resize mask
-        # old_size = mask_3D.shape[:2]  # old_size is in (height, width) format
-        # ratio = float(config.IMAGE_MAX_DIM) / max(old_size)
-        # new_size = tuple([int(x * ratio) for x in old_size])
-        # im = cv2.resize(mask_3D, (new_size[1], new_size[0]))
-        # delta_w = config.IMAGE_MAX_DIM - new_size[1]
-        # delta_h = config.IMAGE_MAX_DIM - new_size[0]
-        # top, bottom = delta_h // 2, delta_h - (delta_h // 2)
-        # left, right = delta_w // 2, delta_w - (delta_w // 2)
-        #
-        # color = [0]
-        # mask = cv2.copyMakeBorder(im, top, bottom, left, right, cv2.BORDER_CONSTANT,
-        #                             value=color)
-        # mask = (mask>0.5).astype('uint8')
-        # # mask = (np.sum(mask, axis=2) > 0.5).astype('uint8')
-        # if len(mask.shape)==2:
-        #     mask = mask[:,:,None]
-        # # class_ids = np.array([class_ids[0]]).astype('int32')
         return mask, class_ids
 
 
@@ -246,7 +243,7 @@ dataset_val_seg.prepare()
 
 model = mrcnn.model.MaskRCNN(mode="training", config=config,
                           model_dir=MODEL_DIR)
-init_with = "last"  # imagenet, coco, or last
+init_with = "coco"  # imagenet, coco, or last
 if init_with == "imagenet":
     model.load_weights(model.get_imagenet_weights(), by_name=True)
 elif init_with == "coco":
@@ -266,17 +263,17 @@ elif init_with == "last":
 
 model.train(dataset_train_seg, dataset_val_seg,
             learning_rate=config.LEARNING_RATE,
-            epochs=4,
+            epochs=2,
             layers='heads')
 
 model.train(dataset_train_seg, dataset_val_seg,
             learning_rate=config.LEARNING_RATE,
-            epochs=12,
+            epochs=6,
             layers='4+')
 
 model.train(dataset_train_seg, dataset_val_seg,
             learning_rate=config.LEARNING_RATE / 10,
-            epochs=12,
+            epochs=6,
             layers="all")
 
 # ## Validate
