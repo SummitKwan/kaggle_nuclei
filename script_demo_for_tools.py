@@ -135,5 +135,25 @@ for i_r, r in enumerate(rs_start):
         plt.axis('off')
         plt.title((r, c), fontsize='x-small')
 
+mask_seg = utils.img_split(mask_true, size_seg=128, overlap=0.5)
+mask_seg = {key: utils.mask_2Dto3D(mask_seg[key]) for key in mask_seg}
+
+
+# ----- 4.2 image stitch
+importlib.reload(utils)
+img_full = utils.img_stitch(img_seg)
+plt.figure()
+plt.imshow(img_full)
+
+# ----- 4.3 mask stitch
+importlib.reload(utils)
+
+mask_full = utils.img_stitch(mask_seg, mode='mask')
+plt.imshow(utils.mask_3Dto2D(mask_full[0]), cmap='Paired')
+
+
+
+
+
 
 

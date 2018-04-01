@@ -9,6 +9,7 @@ import random
 from tqdm import tqdm
 import numpy as np
 import scipy.ndimage as ndimage
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 
@@ -169,6 +170,15 @@ def add_sub_axes(h_axes=None, loc='top', size=0.25, gap=0.02, sub_rect=None):
     return h_subaxes
 
 
+def plot_mask2D(mask2D):
+
+    num_mask = mask2D.max()
+    cmap = np.random.rand(num_mask+1, 3)*0.8 + 0.2
+    cmap[0, :] = 0
+    plt.imshow(mask2D, cmap=mpl.colors.ListedColormap(cmap))
+
+
+
 def plot_img_and_mask_from_file(dict_ids, id_to_plot=None):
     """ plot by reading image form file """
     if id_to_plot is None:
@@ -250,7 +260,7 @@ def segment_mask(mask_unlabeled):
     return ndimage.label(mask_unlabeled)[0]
 
 
-def mask_stack(mask_2D):
+def mask_2Dto3D(mask_2D):
     """ represent masks in np.array(shape=(N, M, num_masks)), where values are either 0 or 1 """
     labels_mask = np.unique(mask_2D)
     labels_mask = labels_mask[labels_mask>0]
@@ -262,7 +272,7 @@ def mask_stack(mask_2D):
     return mask_3D
 
 
-def mask_destack(mask_3D, labels=None):
+def mask_3Dto2D(mask_3D, labels=None):
     """ represent masks in np.array(shape=(N, M)), where values range from 0 to number_masks, coding labels """
 
     """ in case of overlapping masks, the mask with small label index overwrites the one with larger label index """
@@ -409,6 +419,82 @@ def img_split(img, size_seg=128, overlap=0.2):
             segment_starting_index.append((r, c))
             segment_img.append(img[r:r+size_seg, c:c+size_seg])
     return dict(zip(segment_starting_index, segment_img))
+
+
+def img_stitch(segment_img, mode='image'):
+    """
+    stitch images together
+
+    :param segment_img: dict((starting_row, starting_col): np.array of image data )
+    :param mode:  'image' or 'mask'
+    :return: np.array of the full image
+    """
+
+    rc_split = list(segment_img.keys())
+    r_split, c_split = zip(*rc_split)
+    r_split = np.sort(np.unique(r_split))
+    c_split = np.sort(np.unique(c_split))
+    img_shape = segment_img[(r_split[0], c_split[0])].shape
+    r_size_seg = img_shape[0]
+    c_size_seg = img_shape[1]
+    r_size_full = r_split[-1] + r_size_seg
+    c_size_full = c_split[-1] + c_size_seg
+
+    if mode == 'image':
+        img_full_shape = (r_size_full, c_size_full) + img_shape[2:]
+        img_full = np.zeros(shape=img_full_shape, dtype=segment_img[(r_split[0], c_split[0])].dtype)
+
+        for r in r_split:
+            for c in c_split:
+                img_full[r:r+r_size_seg, c:c+c_size_seg] = segment_img[(r, c)]
+        return img_full
+
+    elif mode == 'mask':
+        # gather all masks in the full image coordinate
+        dtype = segment_img[(r_split[0], c_split[0])].dtype
+        mask_full_list = []    # mask filled in the full image coordinate,
+        mask_fseg_list = []    # mask form which segment, segment indexed using (r,c), as the key of input
+        tf_keep_list = []      # true or false to keep the mask
+
+        if len(r_split) <= 1:
+            r_edge = 0
+        else:
+            r_edge = int((r_size_seg-r_split[1])/2)
+        if len(c_split) <= 1:
+            c_edge = 0
+        else:
+            c_edge = int((c_size_seg-c_split[1])/2)
+
+        for i_r, r in enumerate(r_split):
+            for i_c, c in enumerate(c_split):
+                mask_cur = segment_img[(r, c)]
+
+                mask_colloapse_r = np.sum(mask_cur, axis=1)
+                mask_colloapse_c = np.sum(mask_cur, axis=0)
+                mask_size = np.sum(mask_colloapse_r, axis=0)
+                mask_center_r = np.sum(np.arange(r_size_seg)[:, None] * mask_colloapse_r, axis=0) / mask_size
+                mask_center_c = np.sum(np.arange(c_size_seg)[:, None] * mask_colloapse_c, axis=0) / mask_size
+                tf_keep_mask = np.ones(len(mask_size), dtype='bool')
+                if i_r > 0:
+                    tf_keep_mask = tf_keep_mask & (mask_center_r >= r_edge)
+                if i_r < len(r_split) - 1:
+                    tf_keep_mask = tf_keep_mask & (mask_center_r < r_size_seg - r_edge)
+                if i_c > 0:
+                    tf_keep_mask = tf_keep_mask & (mask_center_c >= c_edge)
+                if i_c < len(c_split) - 1:
+                    tf_keep_mask = tf_keep_mask & (mask_center_c < c_size_seg - c_edge)
+                mask_cur_keep = mask_cur[:, :, tf_keep_mask]
+                mask_full_cur = np.zeros(shape=(r_size_full, c_size_full, np.sum(tf_keep_mask)), dtype=dtype)
+                mask_full_cur[r:r+r_size_seg, c:c+c_size_seg] = mask_cur_keep
+                mask_full_list.append(mask_full_cur)
+                mask_fseg_list.extend([(r, c)]*np.sum(tf_keep_mask))
+        mask_full = np.dstack(mask_full_list)
+        mask_fseg = np.array(mask_fseg_list)
+
+        return mask_full, mask_fseg
+    else:
+        warnings.warn('mode should be either "image" or "mask"')
+        return None
 
 
 

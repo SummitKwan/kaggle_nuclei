@@ -3,11 +3,13 @@
 import os
 import sys
 import random
+import time
 import numpy as np
 import scipy as sp
 import pickle
 import matplotlib.pyplot as plt
 
+from tqdm import tqdm
 import utils
 
 # make sure the Mask_RCNN package exists under '..'
@@ -44,31 +46,34 @@ with open('./data/data_test.pickle', 'rb') as f:
 
 
 """ prepare data for training """
-data_train_seg = {}
-# split every image so that the diameter of every nuclei takes 1/16 ~ 1/8 of the image length
-list_amplification = [8, 16]
-# id_img = np.random.choice(list(data_train.keys()))
-for id_img in data_train.keys():
-    img_cur  = data_train[id_img]['image']
-    mask_cur = data_train[id_img]['mask']
-    size_nuclei = int(np.mean(np.sqrt(np.sum(utils.mask_stack(data_train[id_img]['mask']), axis=(0, 1)))))
-    for amplification in list_amplification:
-        img_cur_seg  = utils.img_split(img=img_cur,  size_seg=size_nuclei * amplification)
-        mask_cur_seg = utils.img_split(img=mask_cur, size_seg=size_nuclei * amplification)
-        for start_loc in img_cur_seg.keys():
-            data_train_seg[(id_img, start_loc, amplification)] = {}
-            data_train_seg[(id_img, start_loc, amplification)]['image'] = img_cur_seg[start_loc]
-            data_train_seg[(id_img, start_loc, amplification)]['mask'] = mask_cur_seg[start_loc]
+yn_create_train_seg = False
 
-# id_plot = random.choice(list(data_train_seg.keys()))
-# print(id_plot)
-# utils.plot_img_and_mask_from_dict(data_train_seg, id_plot)
+if yn_create_train_seg:
+    data_train_seg = {}
+    # split every image so that the diameter of every nuclei takes 1/16 ~ 1/8 of the image length
+    list_amplification = [8, 16]
+    # id_img = np.random.choice(list(data_train.keys()))
+    for id_img in data_train.keys():
+        img_cur  = data_train[id_img]['image']
+        mask_cur = data_train[id_img]['mask']
+        size_nuclei = int(np.mean(np.sqrt(np.sum(utils.mask_2Dto3D(data_train[id_img]['mask']), axis=(0, 1)))))
+        for amplification in list_amplification:
+            img_cur_seg  = utils.img_split(img=img_cur,  size_seg=size_nuclei * amplification)
+            mask_cur_seg = utils.img_split(img=mask_cur, size_seg=size_nuclei * amplification)
+            for start_loc in img_cur_seg.keys():
+                data_train_seg[(id_img, start_loc, amplification)] = {}
+                data_train_seg[(id_img, start_loc, amplification)]['image'] = img_cur_seg[start_loc]
+                data_train_seg[(id_img, start_loc, amplification)]['mask'] = mask_cur_seg[start_loc]
 
-if False:
+    # id_plot = random.choice(list(data_train_seg.keys()))
+    # print(id_plot)
+    # utils.plot_img_and_mask_from_dict(data_train_seg, id_plot)
+
     with open('./data/data_train_seg.pickle', 'wb') as f:
         pickle.dump(data_train_seg, f)
-with open('./data/data_train_seg.pickle', 'rb') as f:
-    data_train_seg = pickle.load(f)
+else:
+    with open('./data/data_train_seg.pickle', 'rb') as f:
+        data_train_seg = pickle.load(f)
 
 """ create mrcnn class for using the model """
 
@@ -146,7 +151,7 @@ class NucleiDataset(mrcnn.utils.Dataset):
     def load_mask(self, image_id):
         mask_2D = self.data_dict[self.image_info[image_id]['path']]['mask']
 
-        mask_3D = utils.mask_stack(mask_2D)
+        mask_3D = utils.mask_2Dto3D(mask_2D)
         # label_unique = np.unique(mask_2D)
         # label_unique = label_unique[label_unique > 0]
         # if len(label_unique) > 0:
@@ -241,7 +246,7 @@ dataset_val_seg.prepare()
 
 model = mrcnn.model.MaskRCNN(mode="training", config=config,
                           model_dir=MODEL_DIR)
-init_with = "coco"  # imagenet, coco, or last
+init_with = "last"  # imagenet, coco, or last
 if init_with == "imagenet":
     model.load_weights(model.get_imagenet_weights(), by_name=True)
 elif init_with == "coco":
@@ -310,42 +315,116 @@ model.load_weights(model_path, by_name=True)
 
 
 ## plot a random detection result
+""" plot a random detection result """
+
 image_id = np.random.randint(len(data_test))
 image_name = dataset_test.source_image_link(image_id)
 
 image = data_test[image_name]['image']
 
-image_segs = utils.img_split(image, size_seg=128, overlap=0.2)
 
-data_seg = {}
-for loc_seg, image_seg in image_segs.items():
-    image_detect_res = model.detect([image_seg], verbose=1)[0]
-    masks_seg = image_detect_res['masks']
-    data_seg[loc_seg] = {}
-    data_seg[loc_seg]['image'] = image_seg
-    data_seg[loc_seg]['mask']  = utils.mask_destack(masks_seg)
+def gen_mask_by_seg(image=image, size_seg=256):
 
-segment_starting_index = np.array(list(image_segs.keys()))
-r_start = np.unique(segment_starting_index[:, 0])
-c_start = np.unique(segment_starting_index[:, 1])
-h_fig, h_axes = plt.subplots(len(r_start), len(c_start), squeeze=False)
-for ir, r in enumerate(r_start):
-    for ic, c in  enumerate(c_start):
-        plt.axes(h_axes[ir, ic])
-        utils.plot_img_and_mask_from_dict(data_seg, (r, c))
+    image_segs = utils.img_split(image, size_seg=size_seg, overlap=0.2)
 
+    mask_segs = {}
+    for loc_seg, image_seg in image_segs.items():
+        image_detect_res = model.detect([image_seg], verbose=0)[0]
+        masks_seg = image_detect_res['masks']
+        if masks_seg.shape[:2] != image_seg.shape[:2]:
+            masks_seg = np.zeros(shape=image_seg.shape[:2]+(0, ), dtype='int')
+        mask_segs[loc_seg] = masks_seg
 
-# plt.figure()
-# plt.subplot(1,2,1)
-# plt.imshow(image_seg)
-# plt.subplot(1,2,2)
-# num_mask = masks.shape[2]
-# masks_colored = masks[:, :, :, None] * np.random.rand(1, 1, num_mask, 3)
-# masks_colored_plot = np.ma.average(masks_colored, axis=2, weights=np.stack([masks, masks, masks], axis=3))
-# # masks_colored_plot = np.sum(masks_colored, axis=2)
-# plt.imshow(masks_colored_plot)
+    mask_stitched = utils.img_stitch(mask_segs, mode='mask')[0]
+
+    mask_size = np.mean(np.sqrt(np.sum(mask_stitched, axis=(0, 1))))
+
+    return mask_stitched, mask_size
 
 
+def plot_detection_result(image, mask3D, size_seg=0, mask_size=0):
+    h_fig = plt.figure(figsize=(8, 4))
+    plt.subplot(1, 2, 1)
+    plt.imshow(image)
+    plt.title(size_seg)
+    plt.subplot(1, 2, 2)
+    utils.plot_mask2D(utils.mask_3Dto2D(mask3D))
+    plt.title(mask_size)
+    return h_fig
+
+def gen_mask_by_seg_iter(image=image, size_seg_ini=512, flag_plot=False):
+
+    size_seg = size_seg_ini
+    for i in range(5):
+        mask_stitched, mask_size = gen_mask_by_seg(image, size_seg)
+
+        if flag_plot:
+            plot_detection_result(image, mask_stitched, size_seg, mask_size)
+        if mask_size*10 <= size_seg < mask_size*14:
+            break
+        else:
+            size_seg = int(mask_size * 12)
+    return mask_stitched, size_seg, mask_size
+
+gen_mask_by_seg_iter(image=image, flag_plot=True)
+
+##
+""" run throught all images """
+
+data_detection = {}
+time_str = time.strftime("%Y%m%d_%H%M%S")
+DIR_DETECTION_RESULT = './detection_result'
+if not(os.path.exists(DIR_DETECTION_RESULT)):
+    os.mkdir(DIR_DETECTION_RESULT)
+path_cur_detection_result = os.path.join(DIR_DETECTION_RESULT, time_str)
+os.mkdir(path_cur_detection_result)
+
+flag_isinteractive = plt.isinteractive()
+plt.ioff()
+for image_id in tqdm(data_test):
+    image = data_test[image_id]['image']
+    mask3D, size_seg, mask_size = gen_mask_by_seg_iter(image=image, flag_plot=False)
+    data_detection[image_id] = {}
+    data_detection[image_id]['image'] = image
+    data_detection[image_id]['mask3D'] = mask3D
+    data_detection[image_id]['size_seg_mask'] = (size_seg, mask_size)
+
+    h_fig = plot_detection_result(image, mask3D, size_seg, mask_size)
+    plt.savefig(os.path.join(path_cur_detection_result, image_id))
+    plt.close('all')
+with open(os.path.join(path_cur_detection_result, 'data_detection.pickle'), 'wb') as f:
+    pickle.dump(data_detection, f)
+if flag_isinteractive:
+    plt.ion()
+else:
+    plt.ioff()
+
+
+mask_ImageId = []
+mask_EncodedPixels = []
+for image_id in data_detection:
+    mask_no_overlap = utils.mask_2Dto3D(utils.mask_3Dto2D(data_detection[image_id]['mask3D']))
+    for i_mask in range(mask_no_overlap.shape[2]):
+        mask_ImageId.append(image_id)
+        mask_EncodedPixels.append(utils.rle_encoding(mask_no_overlap[:, :, i_mask]))
+
+with open(os.path.join(path_cur_detection_result, 'test.csv'), 'w') as f:
+    f.write('ImageId,EncodedPixels' + "\n")
+    for image_id, rle in zip(mask_ImageId, mask_EncodedPixels):
+        f.write(image_id + ',')
+        f.write(" ".join([str(num) for num in rle]) + "\n")
+    f.close()
+
+with open("test.csv") as f:
+    test = f.read()
+    for row in test:
+        print(row)
+    f.close()
+
+
+
+
+""" below is legacy code """
 
 ##  Test on a random validation image
 image_id = np.random.choice(dataset_val.image_ids)
