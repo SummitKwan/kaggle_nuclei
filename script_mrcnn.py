@@ -46,7 +46,7 @@ with open('./data/data_test.pickle', 'rb') as f:
 
 
 """ prepare data for training """
-yn_create_train_seg = True
+yn_create_train_seg = False
 yn_use_aug = True
 
 if yn_create_train_seg:
@@ -243,7 +243,7 @@ dataset_val_seg.prepare()
 
 model = mrcnn.model.MaskRCNN(mode="training", config=config,
                           model_dir=MODEL_DIR)
-init_with = "coco"  # imagenet, coco, or last
+init_with = "last"  # imagenet, coco, or last
 if init_with == "imagenet":
     model.load_weights(model.get_imagenet_weights(), by_name=True)
 elif init_with == "coco":
@@ -278,17 +278,6 @@ model.train(dataset_train_seg, dataset_val_seg,
 
 # ## Validate
 
-def get_ax(rows=1, cols=1, size=8):
-    """Return a Matplotlib Axes array to be used in
-    all visualizations in the notebook. Provide a
-    central point to control graph sizes.
-
-    Change the default size attribute to control the size
-    of rendered images
-    """
-    _, ax = plt.subplots(rows, cols, figsize=(size * cols, size * rows))
-    return ax
-
 class InferenceConfig(NucleiConfig):
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
@@ -314,10 +303,9 @@ model.load_weights(model_path, by_name=True)
 ## plot a random detection result
 """ plot a random detection result """
 
-image_id = np.random.randint(len(data_test))
-image_name = dataset_test.source_image_link(image_id)
+image_id = random.choice(list(data_test.keys()))
 
-image = data_test[image_name]['image']
+image = data_test[image_id]['image']
 
 
 def gen_mask_by_seg(image=image, size_seg=256):
@@ -374,7 +362,9 @@ DIR_DETECTION_RESULT = './detection_result'
 if not(os.path.exists(DIR_DETECTION_RESULT)):
     os.mkdir(DIR_DETECTION_RESULT)
 path_cur_detection_result = os.path.join(DIR_DETECTION_RESULT, time_str)
+path_cur_detection_result_figs = os.path.join(path_cur_detection_result, 'figs')
 os.mkdir(path_cur_detection_result)
+os.mkdir(path_cur_detection_result_figs)
 
 flag_isinteractive = plt.isinteractive()
 plt.ioff()
@@ -387,7 +377,7 @@ for image_id in tqdm(data_test):
     data_detection[image_id]['size_seg_mask'] = (size_seg, mask_size)
 
     h_fig = plot_detection_result(image, mask3D, size_seg, mask_size)
-    plt.savefig(os.path.join(path_cur_detection_result, image_id))
+    plt.savefig(os.path.join(path_cur_detection_result_figs, image_id))
     plt.close('all')
 with open(os.path.join(path_cur_detection_result, 'data_detection.pickle'), 'wb') as f:
     pickle.dump(data_detection, f)
