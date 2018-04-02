@@ -48,43 +48,62 @@ with open('./data/data_test.pickle', 'rb') as f:
 """ prepare data for training """
 yn_create_train_seg = False
 yn_use_aug = True
+yn_dark_nuclei = True
+
+if yn_dark_nuclei:
+    data_train_dark_nuclei = {}
+    for id_img in data_train:
+        data_train_dark_nuclei[id_img] = {}
+        image_bw = np.mean(data_train[id_img]['image'], axis=2)
+        if np.mean(image_bw[data_train[id_img]['mask']>0]) > np.mean(image_bw):
+            data_train_dark_nuclei[id_img]['image'] = 255-data_train[id_img]['image']
+        else:
+            data_train_dark_nuclei[id_img]['image'] = data_train[id_img]['image']
+        data_train_dark_nuclei[id_img]['mask'] = data_train[id_img]['mask']
 
 if yn_create_train_seg:
-
     if yn_use_aug:
         data_train_aug = {}
         for id_img in data_train.keys():
+            image_cur = data_train[id_img]['image']
+            mask_cur = data_train[id_img]['mask']
+
+            if yn_dark_nuclei:
+                image_bw = np.mean(image_cur, axis=2)
+                if np.mean(image_bw[mask_cur > 0]) > np.mean(image_bw):
+                    image_cur = 255 - image_cur
+
             data_train_aug[id_img + '_o0'] = {}
-            data_train_aug[id_img + '_o0']['image'] = data_train[id_img]['image']
-            data_train_aug[id_img + '_o0']['mask'] = data_train[id_img]['mask']
+            data_train_aug[id_img + '_o0']['image'] = image_cur
+            data_train_aug[id_img + '_o0']['mask'] = mask_cur
             data_train_aug[id_img + '_o1'] = {}
-            data_train_aug[id_img + '_o1']['image'] = np.rot90(data_train[id_img]['image'], 1)
-            data_train_aug[id_img + '_o1']['mask'] = np.rot90(data_train[id_img]['mask'], 1)
+            data_train_aug[id_img + '_o1']['image'] = np.rot90(image_cur, 1)
+            data_train_aug[id_img + '_o1']['mask'] = np.rot90(mask_cur, 1)
             data_train_aug[id_img + '_o2'] = {}
-            data_train_aug[id_img + '_o2']['image'] = np.rot90(data_train[id_img]['image'], 2)
-            data_train_aug[id_img + '_o2']['mask'] = np.rot90(data_train[id_img]['mask'], 2)
+            data_train_aug[id_img + '_o2']['image'] = np.rot90(image_cur, 2)
+            data_train_aug[id_img + '_o2']['mask'] = np.rot90(mask_cur, 2)
             data_train_aug[id_img + '_o3'] = {}
-            data_train_aug[id_img + '_o3']['image'] = np.rot90(data_train[id_img]['image'], 3)
-            data_train_aug[id_img + '_o3']['mask'] = np.rot90(data_train[id_img]['mask'], 3)
-            data_train_aug[id_img + '_o4'] = {}
-            data_train_aug[id_img + '_o4']['image'] = np.fliplr(data_train[id_img]['image'])
-            data_train_aug[id_img + '_o4']['mask'] = np.fliplr(data_train[id_img]['mask'])
-            data_train_aug[id_img + '_o5'] = {}
-            data_train_aug[id_img + '_o5']['image'] = np.rot90(np.fliplr(data_train[id_img]['image']), 1)
-            data_train_aug[id_img + '_o5']['mask'] = np.rot90(np.fliplr(data_train[id_img]['mask']), 1)
-            data_train_aug[id_img + '_o6'] = {}
-            data_train_aug[id_img + '_o6']['image'] = np.rot90(np.fliplr(data_train[id_img]['image']), 2)
-            data_train_aug[id_img + '_o6']['mask'] = np.rot90(np.fliplr(data_train[id_img]['mask']), 2)
-            data_train_aug[id_img + '_o7'] = {}
-            data_train_aug[id_img + '_o7']['image'] = np.rot90(np.fliplr(data_train[id_img]['image']), 3)
-            data_train_aug[id_img + '_o7']['mask'] = np.rot90(np.fliplr(data_train[id_img]['mask']), 3)
+            data_train_aug[id_img + '_o3']['image'] = np.rot90(image_cur, 3)
+            data_train_aug[id_img + '_o3']['mask'] = np.rot90(mask_cur, 3)
+            # data_train_aug[id_img + '_o4'] = {}
+            # data_train_aug[id_img + '_o4']['image'] = np.fliplr(image_cur)
+            # data_train_aug[id_img + '_o4']['mask'] = np.fliplr(mask_cur)
+            # data_train_aug[id_img + '_o5'] = {}
+            # data_train_aug[id_img + '_o5']['image'] = np.rot90(np.fliplr(image_cur), 1)
+            # data_train_aug[id_img + '_o5']['mask'] = np.rot90(np.fliplr(mask_cur), 1)
+            # data_train_aug[id_img + '_o6'] = {}
+            # data_train_aug[id_img + '_o6']['image'] = np.rot90(np.fliplr(image_cur), 2)
+            # data_train_aug[id_img + '_o6']['mask'] = np.rot90(np.fliplr(mask_cur), 2)
+            # data_train_aug[id_img + '_o7'] = {}
+            # data_train_aug[id_img + '_o7']['image'] = np.rot90(np.fliplr(image_cur), 3)
+            # data_train_aug[id_img + '_o7']['mask'] = np.rot90(np.fliplr(mask_cur), 3)
         data_train_selection = data_train_aug
     else:
         data_train_selection = data_train
 
     data_train_seg = {}
     # split every image so that the diameter of every nuclei takes 1/16 ~ 1/8 of the image length
-    list_amplification = [8, 16]
+    list_amplification = [12, 24, 48]
     for id_img in tqdm(data_train_selection.keys()):
         img_cur  = data_train_selection[id_img]['image']
         mask_cur = data_train_selection[id_img]['mask']
@@ -97,7 +116,10 @@ if yn_create_train_seg:
                 data_train_seg[(id_img, start_loc, amplification)]['image'] = img_cur_seg[start_loc]
                 data_train_seg[(id_img, start_loc, amplification)]['mask'] = mask_cur_seg[start_loc]
 
-    if yn_use_aug:
+    if yn_dark_nuclei:
+        with open('./data/data_train_dn_seg.pickle', 'wb') as f:
+            pickle.dump(data_train_seg, f)
+    elif yn_use_aug:
         with open('./data/data_train_aug_seg.pickle', 'wb') as f:
             pickle.dump(data_train_seg, f)
     else:
@@ -105,7 +127,10 @@ if yn_create_train_seg:
             pickle.dump(data_train_seg, f)
 
 else:
-    if yn_use_aug:
+    if yn_dark_nuclei:
+        with open('./data/data_train_dn_seg.pickle', 'rb') as f:
+            data_train_seg = pickle.load(f)
+    elif yn_use_aug:
         with open('./data/data_train_aug_seg.pickle', 'rb') as f:
             data_train_seg = pickle.load(f)
     else:
@@ -150,7 +175,7 @@ class NucleiConfig(mrcnn.config.Config):
     DETECTION_MAX_INSTANCES = 100
 
     # Use a small epoch since the data is simple
-    STEPS_PER_EPOCH = 1000
+    STEPS_PER_EPOCH = 5000
 
     # use small validation steps since the epoch is small
     VALIDATION_STEPS = 50
@@ -182,32 +207,33 @@ class NucleiDataset(mrcnn.utils.Dataset):
 
 
 """ prepare for full images """
-proportion_val = 0.2
-keys_data = list(data_train.keys())
-keys_data_shuffle =  random.sample(keys_data, k=len(keys_data))
+if False:
+    proportion_val = 0.2
+    keys_data = list(data_train.keys())
+    keys_data_shuffle =  random.sample(keys_data, k=len(keys_data))
 
-num_train = int((1-proportion_val)*len(keys_data))
-keys_train = keys_data_shuffle[:num_train]
-keys_val   = keys_data_shuffle[num_train:]
+    num_train = int((1-proportion_val)*len(keys_data))
+    keys_train = keys_data_shuffle[:num_train]
+    keys_val   = keys_data_shuffle[num_train:]
 
 
-dataset_train_all = NucleiDataset()
-dataset_train_all.add_data_dict(data_train)
-dataset_train_all.prepare()
+    dataset_train_all = NucleiDataset()
+    dataset_train_all.add_data_dict(data_train)
+    dataset_train_all.prepare()
 
-dataset_train = NucleiDataset()
-dataset_train.add_data_dict({key:data_train[key] for key in keys_train})
-dataset_train.prepare()
+    dataset_train = NucleiDataset()
+    dataset_train.add_data_dict({key:data_train[key] for key in keys_train})
+    dataset_train.prepare()
 
-dataset_val = NucleiDataset()
-dataset_val.add_data_dict({key:data_train[key] for key in keys_val})
-dataset_val.prepare()
+    dataset_val = NucleiDataset()
+    dataset_val.add_data_dict({key:data_train[key] for key in keys_val})
+    dataset_val.prepare()
 
-for id_img in data_test.keys():
-    data_test[id_img]['mask'] = np.zeros(data_test[id_img]['image'].shape[:2] + (1,))
-dataset_test = NucleiDataset()
-dataset_test.add_data_dict(data_test)
-dataset_test.prepare()
+    for id_img in data_test.keys():
+        data_test[id_img]['mask'] = np.zeros(data_test[id_img]['image'].shape[:2] + (1,))
+    dataset_test = NucleiDataset()
+    dataset_test.add_data_dict(data_test)
+    dataset_test.prepare()
 
 
 """ prepare for splitted image """
@@ -243,7 +269,7 @@ dataset_val_seg.prepare()
 
 model = mrcnn.model.MaskRCNN(mode="training", config=config,
                           model_dir=MODEL_DIR)
-init_with = "last"  # imagenet, coco, or last
+init_with = "coco"  # imagenet, coco, or last
 if init_with == "imagenet":
     model.load_weights(model.get_imagenet_weights(), by_name=True)
 elif init_with == "coco":
@@ -276,7 +302,8 @@ model.train(dataset_train_seg, dataset_val_seg,
             epochs=6,
             layers="all")
 
-# ## Validate
+## Validate
+""" validate """
 
 class InferenceConfig(NucleiConfig):
     GPU_COUNT = 1
@@ -305,10 +332,20 @@ model.load_weights(model_path, by_name=True)
 
 image_id = random.choice(list(data_test.keys()))
 
+image_id = '0f1f896d9ae5a04752d3239c690402c022db4d72c0d2c087d73380896f72c466'
 image = data_test[image_id]['image']
 
 
-def gen_mask_by_seg(image=image, size_seg=256):
+def image_dn(image=image):
+    if np.mean(image) < 100:
+        return 255-image
+    else:
+        return image
+
+def gen_mask_by_seg(image=image, size_seg=256, flag_use_dn=False):
+
+    if flag_use_dn:
+        image = image_dn(image)
 
     image_segs = utils.img_split(image, size_seg=size_seg, overlap=0.2)
 
@@ -322,8 +359,14 @@ def gen_mask_by_seg(image=image, size_seg=256):
 
     mask_stitched = utils.img_stitch(mask_segs, mode='mask')[0]
 
+    if True:  # filter out mask that is not darker than average
+        yn_keep_mask = np.ones(shape=mask_stitched.shape[2], dtype='bool')
+        image_bw = np.mean(image, axis=2)
+        image_mean = np.mean(image_bw)
+        for i_mask in range(mask_stitched.shape[2]):
+            yn_keep_mask[i_mask] = (np.average(image_bw, weights=mask_stitched[:,:, i_mask]) < image_mean)
+        mask_stitched = mask_stitched[:, :, yn_keep_mask]
     mask_size = np.mean(np.sqrt(np.sum(mask_stitched, axis=(0, 1))))
-
     return mask_stitched, mask_size
 
 
@@ -337,21 +380,24 @@ def plot_detection_result(image, mask3D, size_seg=0, mask_size=0):
     plt.title(mask_size)
     return h_fig
 
-def gen_mask_by_seg_iter(image=image, size_seg_ini=512, flag_plot=False):
 
+def gen_mask_by_seg_iter(image=image, size_seg_ini=512, flag_plot=False, flag_use_dn=False):
+
+    mask_stitched = None
+    mask_size = 50
     size_seg = size_seg_ini
     for i in range(5):
-        mask_stitched, mask_size = gen_mask_by_seg(image, size_seg)
-
+        mask_stitched, mask_size = gen_mask_by_seg(image, size_seg, flag_use_dn=flag_use_dn)
         if flag_plot:
             plot_detection_result(image, mask_stitched, size_seg, mask_size)
-        if mask_size*10 <= size_seg < mask_size*14:
+        if mask_size*14 <= size_seg < mask_size*18:
             break
         else:
             size_seg = int(mask_size * 12)
     return mask_stitched, size_seg, mask_size
 
-gen_mask_by_seg_iter(image=image, flag_plot=True)
+gen_mask_by_seg_iter(image=image, flag_plot=True, flag_use_dn=True)
+plt.show()
 
 ##
 """ run throught all images """
@@ -370,13 +416,13 @@ flag_isinteractive = plt.isinteractive()
 plt.ioff()
 for image_id in tqdm(data_test):
     image = data_test[image_id]['image']
-    mask3D, size_seg, mask_size = gen_mask_by_seg_iter(image=image, flag_plot=False)
+    mask3D, size_seg, mask_size = gen_mask_by_seg_iter(image=image, flag_plot=False, flag_use_dn=True)
     data_detection[image_id] = {}
     data_detection[image_id]['image'] = image
     data_detection[image_id]['mask3D'] = mask3D
     data_detection[image_id]['size_seg_mask'] = (size_seg, mask_size)
-
     h_fig = plot_detection_result(image, mask3D, size_seg, mask_size)
+    plt.suptitle(np.mean(image))
     plt.savefig(os.path.join(path_cur_detection_result_figs, image_id))
     plt.close('all')
 with open(os.path.join(path_cur_detection_result, 'data_detection.pickle'), 'wb') as f:
@@ -386,7 +432,7 @@ if flag_isinteractive:
 else:
     plt.ioff()
 
-
+# store encoding result
 mask_ImageId = []
 mask_EncodedPixels = []
 for image_id in data_detection:
@@ -402,133 +448,16 @@ with open(os.path.join(path_cur_detection_result, 'test.csv'), 'w') as f:
         f.write(" ".join([str(num) for num in rle]) + "\n")
     f.close()
 
-with open("test.csv") as f:
-    test = f.read()
-    for row in test:
-        print(row)
-    f.close()
-
-
-
-
-""" below is legacy code """
-
-##  Test on a random validation image
-image_id = np.random.choice(dataset_val.image_ids)
-original_image, image_meta, gt_class_id, gt_bbox, gt_mask = mrcnn.model.load_image_gt(dataset_val, inference_config,
-                           image_id, use_mini_mask=False)
-
-mrcnn.model.log("original_image", original_image)
-mrcnn.model.log("image_meta", image_meta)
-mrcnn.model.log("gt_class_id", gt_class_id)
-mrcnn.model.log("gt_bbox", gt_bbox)
-mrcnn.model.log("gt_mask", gt_mask)
-
-mrcnn.visualize.display_instances(original_image, gt_bbox, gt_mask, gt_class_id,
-                                  ['', ''], figsize=(8, 8))
-
-results = model.detect([original_image], verbose=1)
-
-r = results[0]
-mrcnn.visualize.display_instances(original_image, r['rois'], r['masks'], r['class_ids'],
-                            ['', ''], ax=get_ax())
-##
-
-
-##  Test on a random test image
-image_id = np.random.choice(dataset_test.image_ids)
-original_image, image_meta, gt_class_id, gt_bbox, gt_mask = mrcnn.model.load_image_gt(dataset_test, inference_config,
-                           image_id, use_mini_mask=False)
-
-
-
-mrcnn.model.log("original_image", original_image)
-mrcnn.model.log("image_meta", image_meta)
-# mrcnn.model.log("gt_class_id", gt_class_id)
-# mrcnn.model.log("gt_bbox", gt_bbox)
-# mrcnn.model.log("gt_mask", gt_mask)
-
-mrcnn.visualize.display_instances(original_image, gt_bbox, gt_mask, gt_class_id,
-                                  [''], figsize=(8, 8))
-
-results = model.detect([original_image], verbose=1)
-
-r = results[0]
-mrcnn.visualize.display_instances(original_image, r['rois'], r['masks'], r['class_ids'],
-                            ['', ''], ax=get_ax())
-##
-
-
-
-## Evaluation
-
-# Compute VOC-Style mAP @ IoU=0.5
-image_ids = np.random.choice(dataset_val.image_ids, 100)
-APs = []
-P_Kaggles = []
-iou_thresholds = np.arange(0.5,0.95,0.05)
-for i in iou_thresholds:
-    APs_i = []
-    P_Kaggle_i = []
-    print('threshold: {}'.format(i))
-    for image_id in image_ids:
-        # Load image and ground truth data
-        image, image_meta, gt_class_id, gt_bbox, gt_mask = mrcnn.model.load_image_gt(dataset_val, inference_config,
-                                                                                  image_id, use_mini_mask=False)
-        molded_images = np.expand_dims(mrcnn.model.mold_image(image, inference_config), 0)
-        # Run object detection
-        results = model.detect([image], verbose=0)
-        r = results[0]
-        # Compute AP
-        AP, precision_kaggle, precisions, recalls, overlaps = mrcnn.utils.compute_ap(gt_bbox, gt_class_id, gt_mask,
-                                                             r["rois"], r["class_ids"], r["scores"], r['masks'],
-                                                             iou_threshold = i)
-        APs_i.append(AP)
-        P_Kaggle_i.append(precision_kaggle)
-    APs.append(APs_i)
-    P_Kaggles.append(P_Kaggle_i)
-
-print("mAP: ", np.mean(np.array(APs),axis=1))
-print("Precision Kaggle: ", np.mean(np.array(P_Kaggles),axis=1))
+# with open("test.csv") as f:
+#     test = f.read()
+#     for row in test:
+#         print(row)
+#     f.close()
 
 
 ##
-
-
-test_img_keys = list(data_test.keys())
-images = [data_test[key]['image'] for key in test_img_keys]
-results = []
-for image in images:
-    results.append(model.detect([image], verbose=1))
-
-mask_ImageId = []
-mask_EncodedPixels = []
-for i in range(len(results)):
-    masks_i = results[i][0]['masks']
-    for j in range(results[i][0]['masks'].shape[2]):
-        sum_masks_i = np.sum(masks_i, axis=2)
-        mask = masks_i[:,:,j]
-        mask[sum_masks_i>1] = 0
-        masks_i[:,:,j] = mask
-        if np.sum(mask)>1:
-            mask_ImageId.append(test_img_keys[i])
-            recoded_mask = utils.rle_encoding(mask)
-            mask_EncodedPixels.append(recoded_mask)
-masks = {'ImageId':mask_ImageId,'EncodedPixels':mask_EncodedPixels}
-
-with open("test.csv","w") as f:
-    f.write(",".join(masks.keys()) + "\n")
-    for i in range(len(masks['ImageId'])):
-        f.write(masks['ImageId'][i] + ',')
-        f.write(" ".join([str(n) for n in masks['EncodedPixels'][i]]) + "\n")
-    f.close()
-
-with open("test.csv") as f:
-    test = f.read()
-    for row in test:
-        print(row)
-    f.close()
-
-
-
-
+""" cluster image based on contrast """
+temp = np.array([np.mean(image_dict['image'], axis=(0,1)) for image_id, image_dict in data_train.items()])
+plt.hist(np.mean(temp, axis=1), bins=20)
+plt.ion()
+plt.show()
