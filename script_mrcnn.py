@@ -46,7 +46,7 @@ with open('./data/data_test.pickle', 'rb') as f:
 
 
 """ prepare data for training """
-yn_create_train_seg = False
+yn_create_train_seg = True
 yn_use_aug = True
 yn_dark_nuclei = True
 
@@ -103,7 +103,7 @@ if yn_create_train_seg:
 
     data_train_seg = {}
     # split every image so that the diameter of every nuclei takes 1/16 ~ 1/8 of the image length
-    list_amplification = [12, 24, 48]
+    list_amplification = [8, 16]
     for id_img in tqdm(data_train_selection.keys()):
         img_cur  = data_train_selection[id_img]['image']
         mask_cur = data_train_selection[id_img]['mask']
@@ -332,7 +332,7 @@ model.load_weights(model_path, by_name=True)
 
 image_id = random.choice(list(data_test.keys()))
 
-image_id = '0f1f896d9ae5a04752d3239c690402c022db4d72c0d2c087d73380896f72c466'
+# image_id = '0f1f896d9ae5a04752d3239c690402c022db4d72c0d2c087d73380896f72c466'
 image = data_test[image_id]['image']
 
 
@@ -342,42 +342,103 @@ def image_dn(image=image):
     else:
         return image
 
+
+def mean_std_weighted(x, w=None, num_std=3):
+    if w is None:
+        w = np.ones(x.shape)
+    x_mean = np.average(x, weights=w)
+    x_std = np.sqrt(np.average((x-x_mean)**2, weights=w))
+    return x_mean, x_std
+
+
+def post_process(image, mask3D, score=None):
+
+    n = mask3D.shape[2]
+    if n > 3:
+        if score is None:
+            score = np.ones(n)
+        mask_size = np.sqrt(np.sum(mask3D, axis=(0, 1)))
+        image_bw = np.mean(image, axis=2)
+        mask_lumi = np.array([np.mean(np.average(image_bw, weights=mask3D[:, :, i])) for i in range(mask3D.shape[2])])
+
+        size_mean, size_std = mean_std_weighted(mask_size, score**2)
+        lumi_mean, lumi_std = mean_std_weighted(mask_lumi, score**2)
+
+        z_size = (mask_size - size_mean) / size_std
+        z_lumi = (mask_lumi - lumi_mean) / lumi_std
+
+        yn_keep =  (score > 0.8) & ((z_size**2 + z_lumi**2) < 3**2)
+        return yn_keep
+    else:
+        return np.ones(n, dtype='bool')
+
+
 def gen_mask_by_seg(image=image, size_seg=256, flag_use_dn=False):
 
+    # flip sign of the dark field images
     if flag_use_dn:
         image = image_dn(image)
 
     image_segs = utils.img_split(image, size_seg=size_seg, overlap=0.2)
 
+    # split, cmpute mask, stitch
     mask_segs = {}
+    scores_segs = {}
     for loc_seg, image_seg in image_segs.items():
         image_detect_res = model.detect([image_seg], verbose=0)[0]
         masks_seg = image_detect_res['masks']
-        if masks_seg.shape[:2] != image_seg.shape[:2]:
+        scores_seg = image_detect_res['scores']
+        if masks_seg.shape[:2] != image_seg.shape[:2]:   # special case if no mask
             masks_seg = np.zeros(shape=image_seg.shape[:2]+(0, ), dtype='int')
+            scores_seg = np.zeros(shape=(0, ))
         mask_segs[loc_seg] = masks_seg
+        scores_segs[loc_seg] = scores_seg
+    mask_stitched, _, score_stiched = utils.img_stitch(mask_segs, mode='mask', info_mask_dict=scores_segs)
 
-    mask_stitched = utils.img_stitch(mask_segs, mode='mask')[0]
+    # post processing
+    if False:  # filter out mask that is not darker than average
+        pass
 
-    if True:  # filter out mask that is not darker than average
-        yn_keep_mask = np.ones(shape=mask_stitched.shape[2], dtype='bool')
-        image_bw = np.mean(image, axis=2)
-        image_mean = np.mean(image_bw)
-        for i_mask in range(mask_stitched.shape[2]):
-            yn_keep_mask[i_mask] = (np.average(image_bw, weights=mask_stitched[:,:, i_mask]) < image_mean)
-        mask_stitched = mask_stitched[:, :, yn_keep_mask]
     mask_size = np.mean(np.sqrt(np.sum(mask_stitched, axis=(0, 1))))
-    return mask_stitched, mask_size
+    return mask_stitched, score_stiched, mask_size
 
 
-def plot_detection_result(image, mask3D, size_seg=0, mask_size=0):
-    h_fig = plt.figure(figsize=(8, 4))
-    plt.subplot(1, 2, 1)
+def plot_detection_result(image, mask3D, size_seg=0, mask_size=0, score=None):
+
+    num_row = 1 if score is None else 2
+    fig_height = 4 if score is None else 8
+    h_fig = plt.figure(figsize=(fig_height, 8))
+
+    plt.subplot(num_row, 2, 1)
     plt.imshow(image)
-    plt.title(size_seg)
-    plt.subplot(1, 2, 2)
+    plt.axis('off')
+    plt.title('{}, size_seg={}'.format(image.shape[:2], size_seg))
+    plt.subplot(num_row, 2, 2)
     utils.plot_mask2D(utils.mask_3Dto2D(mask3D))
-    plt.title(mask_size)
+    plt.axis('off')
+    plt.title('mask_size={:.2f}'.format(mask_size))
+    if score is not None:
+        plt.subplot(2, 2, 3)
+        yn_keep = post_process(image, mask3D, score)
+        plt.imshow(np.any(mask3D, axis=2).astype('int') + np.any(mask3D[:, :, yn_keep==False], axis=2), vmin=0, vmax=2)
+        plt.axis('off')
+        plt.title('filtered out {}'.format(np.sum(yn_keep==False)))
+
+        try:
+            plt.subplot(6, 2, 8)
+            plt.hist(score, bins=np.arange(0.5, 1.01, 0.02))
+            plt.ylabel('score')
+            plt.subplot(6, 2, 10)
+            mask_size = np.sqrt(np.sum(mask3D, axis=(0, 1)))
+            plt.hist(mask_size, bins=np.linspace(0, mask_size.max(), 20))
+            plt.ylabel('size')
+            plt.subplot(6, 2, 12)
+            image_bw = np.mean(image, axis=2)
+            mask_lum = np.array([np.mean(np.average(image_bw, weights=mask3D[:, :, i])) for i in range(mask3D.shape[2])])
+            plt.hist(mask_lum, bins=20)
+            plt.ylabel('luminance')
+        except:
+            pass
     return h_fig
 
 
@@ -387,14 +448,14 @@ def gen_mask_by_seg_iter(image=image, size_seg_ini=512, flag_plot=False, flag_us
     mask_size = 50
     size_seg = size_seg_ini
     for i in range(5):
-        mask_stitched, mask_size = gen_mask_by_seg(image, size_seg, flag_use_dn=flag_use_dn)
+        mask_stitched, score_stitched, mask_size = gen_mask_by_seg(image, size_seg, flag_use_dn=flag_use_dn)
         if flag_plot:
-            plot_detection_result(image, mask_stitched, size_seg, mask_size)
-        if mask_size*14 <= size_seg < mask_size*18:
+            plot_detection_result(image, mask_stitched, size_seg, mask_size, score_stitched)
+        if mask_size*10 <= size_seg < mask_size*14:
             break
         else:
             size_seg = int(mask_size * 12)
-    return mask_stitched, size_seg, mask_size
+    return mask_stitched, score_stitched, size_seg, mask_size
 
 gen_mask_by_seg_iter(image=image, flag_plot=True, flag_use_dn=True)
 plt.show()
@@ -416,15 +477,25 @@ flag_isinteractive = plt.isinteractive()
 plt.ioff()
 for image_id in tqdm(data_test):
     image = data_test[image_id]['image']
-    mask3D, size_seg, mask_size = gen_mask_by_seg_iter(image=image, flag_plot=False, flag_use_dn=True)
-    data_detection[image_id] = {}
-    data_detection[image_id]['image'] = image
-    data_detection[image_id]['mask3D'] = mask3D
-    data_detection[image_id]['size_seg_mask'] = (size_seg, mask_size)
-    h_fig = plot_detection_result(image, mask3D, size_seg, mask_size)
+    mask3D, score, size_seg, mask_size = gen_mask_by_seg_iter(image=image, flag_plot=False, flag_use_dn=True)
+
+    # plot
+    h_fig = plot_detection_result(image, mask3D, size_seg, mask_size, score)
     plt.suptitle(np.mean(image))
     plt.savefig(os.path.join(path_cur_detection_result_figs, image_id))
     plt.close('all')
+
+    # post process
+    yn_keep_mask = np.ones(mask3D.shape[2], dtype='bool')
+    if True:
+        yn_keep_mask = post_process(image, mask3D)
+    mask3D_pp = mask3D[:, :, yn_keep_mask]
+
+    data_detection[image_id] = {}
+    data_detection[image_id]['image'] = image
+    data_detection[image_id]['mask3D'] = mask3D_pp
+    data_detection[image_id]['size_seg_mask'] = (size_seg, mask_size)
+
 with open(os.path.join(path_cur_detection_result, 'data_detection.pickle'), 'wb') as f:
     pickle.dump(data_detection, f)
 if flag_isinteractive:

@@ -421,7 +421,7 @@ def img_split(img, size_seg=128, overlap=0.2):
     return dict(zip(segment_starting_index, segment_img))
 
 
-def img_stitch(segment_img, mode='image'):
+def img_stitch(segment_img, mode='image', info_mask_dict=None):
     """
     stitch images together
 
@@ -454,6 +454,7 @@ def img_stitch(segment_img, mode='image'):
         dtype = segment_img[(r_split[0], c_split[0])].dtype
         mask_full_list = []    # mask filled in the full image coordinate,
         mask_fseg_list = []    # mask form which segment, segment indexed using (r,c), as the key of input
+        mask_info_list = []    # mask info, like score
         tf_keep_list = []      # true or false to keep the mask
 
         if len(r_split) <= 1:
@@ -488,10 +489,12 @@ def img_stitch(segment_img, mode='image'):
                 mask_full_cur[r:r+r_size_seg, c:c+c_size_seg] = mask_cur_keep
                 mask_full_list.append(mask_full_cur)
                 mask_fseg_list.extend([(r, c)]*np.sum(tf_keep_mask))
+                if info_mask_dict is not None:
+                    mask_info_list.append(info_mask_dict[(r, c)][tf_keep_mask])
         mask_full = np.dstack(mask_full_list)
         mask_fseg = np.array(mask_fseg_list)
-
-        return mask_full, mask_fseg
+        mask_info = np.concatenate(mask_info_list)
+        return mask_full, mask_fseg, mask_info
     else:
         warnings.warn('mode should be either "image" or "mask"')
         return None
