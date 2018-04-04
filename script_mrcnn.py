@@ -46,7 +46,7 @@ with open('./data/data_test.pickle', 'rb') as f:
 
 
 """ prepare data for training """
-yn_create_train_seg = True
+yn_create_train_seg = False
 yn_use_aug = True
 yn_dark_nuclei = True
 
@@ -321,6 +321,11 @@ model = mrcnn.model.MaskRCNN(mode="inference",
 # model_path = os.path.join(ROOT_DIR, ".h5 file name here")
 model_path = model.find_last()[1]
 
+# specify model path
+# model_path = os.path.join(ROOT_DIR, 'mrcnn_logs',
+#                           'nuclei20180401T2125_seg_ampli_12_24_48_50000_instance_per_epoch',
+#                           "mask_rcnn_nuclei_0003.h5")
+
 # Load trained weights (fill in path to trained weights here)
 assert model_path != "", "Provide path to trained weights"
 print("Loading weights from ", model_path)
@@ -343,7 +348,7 @@ def image_dn(image=image):
         return image
 
 
-def mean_std_weighted(x, w=None, num_std=3):
+def mean_std_weighted(x, w=None):
     if w is None:
         w = np.ones(x.shape)
     x_mean = np.average(x, weights=w)
@@ -352,6 +357,7 @@ def mean_std_weighted(x, w=None, num_std=3):
 
 
 def post_process(image, mask3D, score=None):
+    """ filter out outliers: score>0.8, size and luminance within 3 std """
 
     n = mask3D.shape[2]
     if n > 3:
@@ -367,10 +373,54 @@ def post_process(image, mask3D, score=None):
         z_size = (mask_size - size_mean) / size_std
         z_lumi = (mask_lumi - lumi_mean) / lumi_std
 
-        yn_keep =  (score > 0.8) & ((z_size**2 + z_lumi**2) < 3**2)
+        yn_keep = (score > 0.8) & ((z_size**2 + z_lumi**2) < 3**2)
         return yn_keep
     else:
         return np.ones(n, dtype='bool')
+
+
+def remove_overlap(mask3D, labels=None):
+    """ in case of overlapping masks, the mask with small label index overwrites the one with larger label index """
+    n, m, k = mask3D.shape
+    if labels is None:
+        labels = np.random.permutation(k)
+    i_sort = np.argsort(np.argsort(labels))
+    mask3D_res = np.zeros(shape=mask3D.shape, dtype=mask3D.dtype)
+    for i in range(k):
+        mask_cur = mask3D[:, :, i]
+        mask_to_compare = mask3D[:, :, i_sort<i_sort[i]]
+        pixel_overlap = mask_cur[:, :, None] * mask_to_compare
+        yn_overlap = np.sum(pixel_overlap, axis=(0, 1)) > 0
+
+        if np.any(yn_overlap):
+
+            pixel_to_remove = (np.sum(pixel_overlap, axis=2) > 0)
+
+            area_overlap = np.sum(pixel_overlap, axis=(0, 1))
+
+            yn_discard_cur = np.any( (area_overlap[yn_overlap] > 0.5 * mask_cur.sum()) |
+                                     (area_overlap[yn_overlap] > 0.5 * np.sum(mask_to_compare[:,:, yn_overlap], axis=(0,1))) )
+            if yn_discard_cur:
+                mask3D_res[:, :, i] = 0
+            else:
+                mask3D_res[:, :, i] = mask3D[:, :, i] - pixel_to_remove * mask3D[:, :, i]
+
+        else:
+            mask3D_res[:, :, i] = mask3D[:, :, i]
+
+    return mask3D_res
+
+# mask3D = np.zeros([60,60, 4], dtype='uint8')
+# mask3D[0:20, 0:20, 0]=1
+# mask3D[10:30, 10:30, 1]=1
+# mask3D[5:40, 5:40, 2]=1
+# mask3D[50:60, 50:60, 3]=1
+# mask3D_no_overlap = remove_overlap(mask3D, [1,2,0,3])
+# for i in range(4):
+#     plt.subplot(2, 4, i + 1)
+#     plt.imshow(mask3D[:,:,i])
+#     plt.subplot(2, 4, i + 5)
+#     plt.imshow(mask3D_no_overlap[:, :, i])
 
 
 def gen_mask_by_seg(image=image, size_seg=256, flag_use_dn=False):
@@ -399,7 +449,7 @@ def gen_mask_by_seg(image=image, size_seg=256, flag_use_dn=False):
     if False:  # filter out mask that is not darker than average
         pass
 
-    mask_size = np.mean(np.sqrt(np.sum(mask_stitched, axis=(0, 1))))
+    mask_size = np.average(np.sqrt(np.sum(mask_stitched, axis=(0, 1))), weights=score_stiched)
     return mask_stitched, score_stiched, mask_size
 
 
@@ -444,6 +494,10 @@ def plot_detection_result(image, mask3D, size_seg=0, mask_size=0, score=None):
 
 def gen_mask_by_seg_iter(image=image, size_seg_ini=512, flag_plot=False, flag_use_dn=False):
 
+    amplification_min = 8    # 10
+    amplification_max = 12    # 14
+    amplification_best = 10   # 12
+
     mask_stitched = None
     mask_size = 50
     size_seg = size_seg_ini
@@ -451,13 +505,24 @@ def gen_mask_by_seg_iter(image=image, size_seg_ini=512, flag_plot=False, flag_us
         mask_stitched, score_stitched, mask_size = gen_mask_by_seg(image, size_seg, flag_use_dn=flag_use_dn)
         if flag_plot:
             plot_detection_result(image, mask_stitched, size_seg, mask_size, score_stitched)
-        if mask_size*10 <= size_seg < mask_size*14:
+        if not(np.isfinite(mask_size)) or mask_size*amplification_min <= size_seg < mask_size*amplification_max:
             break
         else:
-            size_seg = int(mask_size * 12)
+            size_seg = int(mask_size * amplification_best)
+
+    # remove overlap:
+    mask_stitched = remove_overlap(mask_stitched, -score_stitched)
+    # remove empty mask:
+    yn_keep = np.sum(mask_stitched, axis=(0, 1)) > 0
+    mask_stitched = mask_stitched[:, :, yn_keep]
+    score_stitched = score_stitched[yn_keep]
+
+    if flag_plot:
+        plot_detection_result(image, mask_stitched, size_seg, mask_size, score_stitched)
+
     return mask_stitched, score_stitched, size_seg, mask_size
 
-gen_mask_by_seg_iter(image=image, flag_plot=True, flag_use_dn=True)
+mask_stitched, score_stitched, size_seg, mask_size = gen_mask_by_seg_iter(image=image, size_seg_ini=256, flag_plot=True, flag_use_dn=True)
 plt.show()
 
 ##
@@ -475,8 +540,16 @@ os.mkdir(path_cur_detection_result_figs)
 
 flag_isinteractive = plt.isinteractive()
 plt.ioff()
-for image_id in tqdm(data_test):
-    image = data_test[image_id]['image']
+
+data_to_use_type = 'train'  # or 'test'
+if data_to_use_type == 'train':
+    data_to_use = data_train
+else:
+    data_to_use = data_test
+
+
+for image_id in tqdm(data_to_use):
+    image = data_to_use[image_id]['image']
     mask3D, score, size_seg, mask_size = gen_mask_by_seg_iter(image=image, flag_plot=False, flag_use_dn=True)
 
     # plot
@@ -491,6 +564,7 @@ for image_id in tqdm(data_test):
         yn_keep_mask = post_process(image, mask3D)
     mask3D_pp = mask3D[:, :, yn_keep_mask]
 
+
     data_detection[image_id] = {}
     data_detection[image_id]['image'] = image
     data_detection[image_id]['mask3D'] = mask3D_pp
@@ -502,6 +576,8 @@ if flag_isinteractive:
     plt.ion()
 else:
     plt.ioff()
+
+
 
 # store encoding result
 mask_ImageId = []
@@ -524,6 +600,49 @@ with open(os.path.join(path_cur_detection_result, 'test.csv'), 'w') as f:
 #     for row in test:
 #         print(row)
 #     f.close()
+
+
+##
+""" performance evaluation """
+path_cur_true_pred_compare = os.path.join(path_cur_detection_result, 'true_pred_fig')
+os.mkdir(path_cur_true_pred_compare)
+list_score = []
+
+flag_isinteractive = plt.isinteractive()
+plt.ioff()
+
+for image_id in tqdm(data_to_use):
+    image = data_to_use[image_id]['image']
+    mask_true = data_to_use[image_id]['mask']
+    mask_pred = utils.mask_3Dto2D(data_detection[image_id]['mask3D'])
+    IOU_cur = utils.cal_prediction_IOU(mask_true, mask_pred)
+    score_cur = utils.cal_score_from_IOU(IOU_cur)
+    list_score.append(score_cur['all'])
+
+    plt.figure(figsize=[8, 8])
+    plt.subplot(2,2,1)
+    plt.imshow(image)
+    plt.subplot(2,2,2)
+    plt.fill_between(np.arange(0.5, 1.0, 0.05), score_cur['all'])
+    plt.xlim([0.5, 1.0])
+    plt.ylim([0, 1])
+    plt.title('score={:.2f}'.format(score_cur['ave']))
+    plt.subplot(2,2,3)
+    utils.plot_mask2D(mask_true)
+    plt.axis('off')
+    plt.title('true')
+    plt.subplot(2,2,4)
+    utils.plot_mask2D(mask_pred)
+    plt.axis('off')
+    plt.title('prediction')
+
+    plt.savefig(os.path.join(path_cur_true_pred_compare, image_id))
+    plt.close('all')
+
+if flag_isinteractive:
+    plt.ion()
+else:
+    plt.ioff()
 
 
 ##
