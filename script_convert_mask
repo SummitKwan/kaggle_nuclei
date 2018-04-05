@@ -1,0 +1,64 @@
+import numpy as np
+from PIL import Image, ImageDraw
+from scipy import misc
+import pandas as pd
+import xmldataset
+import matplotlib.pyplot as plt
+
+##
+filename = 'TCGA-RD-A8N9-01A-01-TS1'
+with open(''.join(['./data/Amit_Sethi_data/Annotations/',filename,'.xml']), 'r') as myfile:
+    data=myfile.read()
+
+profile = """
+Annotations
+    Annotation
+        Regions
+            Region
+                Id = dataset:Vertices
+                Vertices
+                    Vertex
+                        X = dataset:Vertices
+                        Y = dataset:Vertices"""
+
+output = xmldataset.parse_using_profile(data,profile)
+df = pd.DataFrame.from_records(output['Vertices'])
+last_id = 0
+for i in range(df['Id'].shape[0]):
+    if np.isnan(float(df['Id'][i]))==0:
+        last_id = df['Id'][i]
+    else:
+        df['Id'][i] = last_id
+df['Id'] = df['Id'].astype('int')
+df['X'] = df['X'].astype('float')
+df['Y'] = df['Y'].astype('float')
+df.to_pickle(''.join(['./data/Amit_Sethi_data/Annotations/',filename]))
+df = pd.read_pickle(''.join(['./data/Amit_Sethi_data/Annotations/',filename]))
+
+
+# polygon = [(x1,y1),(x2,y2),...] or [x1,y1,x2,y2,...]
+# width = ?
+# height = ?
+
+origimg = misc.imread(''.join(['./data/Amit_Sethi_data/Tissue images/',filename,'.png']))
+width, height = origimg.shape[0], origimg.shape[1]
+
+img = Image.new('L', (width, height), 0)
+uniq_ids = df['Id'].unique()
+j = 0
+polygon = []
+for i in range(df['Id'].shape[0]):
+    if df['Id'][i] == uniq_ids[j]:
+        polygon.append((df['X'][i],df['Y'][i]))
+    else:
+        if len(polygon)>=2:
+        ImageDraw.Draw(img).polygon(polygon, outline=0, fill=1)
+        polygon = []
+        j = j+1
+mask = np.array(img)
+np.save(''.join(['./data/Amit_Sethi_data/Annotations/',filename]),mask)
+##
+plt.subplot(1,2,1)
+plt.imshow(origimg)
+plt.subplot(1,2,2)
+plt.imshow(mask)
