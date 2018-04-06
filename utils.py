@@ -370,6 +370,14 @@ def rle_encoding(mask):
 """ ========== image split and stitch ========== """
 
 
+def floor_pow2(n, yn_half=True):
+    res = 2 ** np.floor(np.log2(n))
+    if yn_half:
+        if n >= res*1.5:
+            res = res*1.5
+    return int(res)
+
+
 def cal_img_split_start_index(img, size_seg=128, overlap=0.2):
     """
      split image to small segments, returns t
