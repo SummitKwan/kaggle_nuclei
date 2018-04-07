@@ -6,6 +6,7 @@ import random
 import time
 import numpy as np
 import scipy as sp
+import scipy.ndimage as ndimage
 import pickle
 import copy
 import matplotlib.pyplot as plt
@@ -48,14 +49,14 @@ with open('./data/data_test.pickle', 'rb') as f:
     data_test = pickle.load(f)
 
 def add_class_to_data_dict(data_dict):
-    for key in data_train:
-        img = data_train[key]['image']
-        mask = data_train[key]['mask']
+    for key in data_dict:
+        img = data_dict[key]['image']
+        mask = data_dict[key]['mask']
         img_bw = np.mean(img, axis=2)
         lumi_fg = np.average(img_bw, weights=(mask>0))
         lumi_bg = np.average(img_bw, weights=(mask==0))
         img_class = 'dark' if lumi_fg > lumi_bg else 'bright'
-        data_train[key]['class'] = img_class
+        data_dict[key]['class'] = img_class
     return data_dict
 
 data_train = add_class_to_data_dict(data_train)
@@ -67,110 +68,121 @@ yn_augment = True
 yn_split = True
 yn_split_balance = True
 
+def process_data(data_train, yn_flip_dark_field=True, yn_augment=True, yn_split=True, yn_split_balance=True, max_num_seg=12):
+    data_train_after = copy.deepcopy(data_train)
 
-data_train_after = copy.deepcopy(data_train)
+    data_train_after = add_class_to_data_dict(data_train_after)
 
-# flip dark field
-if yn_flip_dark_field:
-    for id_img in data_train_after:
-        if data_train_after[id_img]['class'] == 'dark':
-            data_train_after[id_img]['image'] = 255 - data_train_after[id_img]['image']
+    # flip dark field
+    if yn_flip_dark_field:
+        for id_img in data_train_after:
+            if data_train_after[id_img]['class'] == 'dark':
+                data_train_after[id_img]['image'] = 255 - data_train_after[id_img]['image']
 
-# data augmentation by rotation
-if yn_augment:
-    data_train_before, data_train_after = data_train_after, {}
-    for id_img in data_train_before:
-        image_cur = data_train_before[id_img]['image']
-        mask_cur = data_train_before[id_img]['mask']
-        if 'class' in data_train_before[id_img]:
-            class_cur = data_train_before[id_img]['class']
-
-        for i in range(4):
-            id_img_new = id_img + '_rot{}'.format(i)
-            data_train_after[id_img_new] = {}
-            data_train_after[id_img_new]['image'] = np.rot90(image_cur, i)
-            data_train_after[id_img_new]['mask'] = np.rot90(mask_cur, i)
+    # data augmentation by rotation
+    if yn_augment:
+        data_train_before, data_train_after = data_train_after, {}
+        for id_img in data_train_before:
+            image_cur = data_train_before[id_img]['image']
+            mask_cur = data_train_before[id_img]['mask']
             if 'class' in data_train_before[id_img]:
-                data_train_after[id_img_new]['class'] = class_cur
+                class_cur = data_train_before[id_img]['class']
 
-# data split based on nuclei size
-temp = {}
+            for i in range(4):
+                id_img_new = id_img + '_rot{}'.format(i)
+                data_train_after[id_img_new] = {}
+                data_train_after[id_img_new]['image'] = np.rot90(image_cur, i)
+                data_train_after[id_img_new]['mask'] = np.rot90(mask_cur, i)
+                if 'class' in data_train_before[id_img]:
+                    data_train_after[id_img_new]['class'] = class_cur
 
-if yn_split:
-    data_train_before, data_train_after = data_train_after, {}
-    amplification_ideal = 12   # ideal size_patch/size_nuclei
-    min_size_seg = 64
-    for id_img in tqdm(data_train_before.keys()):
-        img_cur  = data_train_before[id_img]['image']
-        mask_cur = data_train_before[id_img]['mask']
-        if 'class' in data_train_before[id_img]:
-            class_cur = data_train_before[id_img]['class']
+    # data split based on nuclei size
+    temp = {}
 
-        size_nuclei = np.sqrt(np.sum(mask_cur > 0)*1.0 / (len((np.unique(mask_cur)))+1))
-        size_nuclei = max(size_nuclei, 8)
-        size_seg_opi = size_nuclei * amplification_ideal
-        size_seg_0 = utils.floor_pow2(size_seg_opi)
-        size_seg_0 = max(min_size_seg, size_seg_0)
-        list_size_seg = [size_seg_0, size_seg_0*2]
-        for size_seg in list_size_seg:
-            img_cur_seg  = utils.img_split(img=img_cur,  size_seg=size_seg)
-            mask_cur_seg = utils.img_split(img=mask_cur, size_seg=size_seg)
-            for start_loc in img_cur_seg.keys():
-                data_train_after[(id_img, start_loc, size_seg)] = {}
-                data_train_after[(id_img, start_loc, size_seg)]['image'] = img_cur_seg[start_loc]
-                data_train_after[(id_img, start_loc, size_seg)]['mask'] = mask_cur_seg[start_loc]
+    if yn_split:
+        data_train_before, data_train_after = data_train_after, {}
+        amplification_ideal = 12   # ideal size_patch/size_nuclei
+        min_size_seg = 64
+        for id_img in tqdm(data_train_before.keys()):
+            img_cur  = data_train_before[id_img]['image']
+            mask_cur = data_train_before[id_img]['mask']
             if 'class' in data_train_before[id_img]:
-                data_train_after[(id_img, start_loc, size_seg)]['class'] = class_cur
+                class_cur = data_train_before[id_img]['class']
 
-# balance dataset
-max_num_seg = 12
-if yn_split and yn_split_balance:
-    data_train_before, data_train_after = data_train_after, {}
-    data_train_after = {}
-    seg_ids = list(data_train_before.keys())
-    dict_img_seg = {}
-    for seg_id in seg_ids:
-        img_id = seg_id[0]
-        if img_id not in dict_img_seg:
-            dict_img_seg[img_id] = []
-        else:
-            dict_img_seg[img_id].append(seg_id)
-    # plt.subplot(1,2,1)
-    # plt.hist([len(value) for key, value in dict_img_seg.items()], 20)
+            size_nuclei = np.sqrt(np.sum(mask_cur > 0)*1.0 / (len((np.unique(mask_cur)))+1))
+            size_nuclei = max(size_nuclei, 8)
+            size_seg_opi = size_nuclei * amplification_ideal
+            size_seg_0 = utils.floor_pow2(size_seg_opi)
+            size_seg_0 = max(min_size_seg, size_seg_0)
+            list_size_seg = [size_seg_0, size_seg_0*2]
+            for size_seg in list_size_seg:
+                img_cur_seg  = utils.img_split(img=img_cur,  size_seg=size_seg)
+                mask_cur_seg = utils.img_split(img=mask_cur, size_seg=size_seg)
+                for start_loc in img_cur_seg.keys():
+                    data_train_after[(id_img, start_loc, size_seg)] = {}
+                    data_train_after[(id_img, start_loc, size_seg)]['image'] = img_cur_seg[start_loc]
+                    data_train_after[(id_img, start_loc, size_seg)]['mask'] = mask_cur_seg[start_loc]
+                if 'class' in data_train_before[id_img]:
+                    data_train_after[(id_img, start_loc, size_seg)]['class'] = class_cur
 
-    for seg_id in dict_img_seg:
-        num_split = len(dict_img_seg[seg_id])
-        if num_split > max_num_seg:   # if too many, select
-            for id_new in random.choices(dict_img_seg[seg_id], k=max_num_seg):
-                data_train_after[id_new + (0, )] = data_train_before[id_new]
-        else:
-            for i in range(max_num_seg//num_split):
-                for id_new in dict_img_seg[seg_id]:
-                    data_train_after[id_new + (i,)] = data_train_before[id_new]
+    # balance dataset
+    if yn_split and yn_split_balance:
+        data_train_before, data_train_after = data_train_after, {}
+        data_train_after = {}
+        seg_ids = list(data_train_before.keys())
+        dict_img_seg = {}
+        for seg_id in seg_ids:
+            img_id = seg_id[0]
+            if img_id not in dict_img_seg:
+                dict_img_seg[img_id] = []
+            else:
+                dict_img_seg[img_id].append(seg_id)
+        # plt.subplot(1,2,1)
+        # plt.hist([len(value) for key, value in dict_img_seg.items()], 20)
+
+        for seg_id in dict_img_seg:
+            num_split = len(dict_img_seg[seg_id])
+            if num_split > max_num_seg:   # if too many, select
+                for id_new in random.choices(dict_img_seg[seg_id], k=max_num_seg):
+                    data_train_after[id_new + (0, )] = data_train_before[id_new]
+            else:
+                for i in range(max_num_seg//num_split):
+                    for id_new in dict_img_seg[seg_id]:
+                        data_train_after[id_new + (i,)] = data_train_before[id_new]
 
 
-data_train_processed = data_train_after
+    data_train_processed = data_train_after
+
+    return data_train_processed
+
+data_train_processed = process_data(data_train)
+
+
 ##
+""" use external data """
 
-# use external data
-if False:
+if True:
+    with open('./data/data_train.pickle', 'rb') as f:
+        data_train_official = pickle.load(f)
     with open('./data/data_train_Amit.pickle', 'rb') as f:
         data_train_Amit = pickle.load(f)
-    data_train_selection = data_train_Amit
-    data_train_seg_Amit = {}
-    for id_img in tqdm(data_train_Amit.keys()):
-        img_cur  = data_train_selection[id_img]['image']
-        mask_cur = data_train_selection[id_img]['mask']
-        img_cur_seg  = utils.img_split(img=img_cur,  size_seg=512)
-        mask_cur_seg = utils.img_split(img=mask_cur, size_seg=512)
-        for start_loc in img_cur_seg.keys():
-            data_train_seg_Amit[(id_img, start_loc)] = {}
-            data_train_seg_Amit[(id_img, start_loc)]['image'] = img_cur_seg[start_loc]
-            data_train_seg_Amit[(id_img, start_loc)]['mask'] = mask_cur_seg[start_loc]
+    with open('./data/data_train_TNBC.pickle', 'rb') as f:
+        data_train_TNBC = pickle.load(f)
 
-    data_train = {**data_train,  **data_train_seg_Amit}
+    print(len(data_train_official), len(data_train_Amit), len(data_train_TNBC))
 
+    data_train_official_processed = process_data(data_train_official, yn_flip_dark_field=True, yn_augment=True,
+                                                 yn_split=True, yn_split_balance=True, max_num_seg=12)
+    data_train_Amit_processed = process_data(data_train_Amit, yn_flip_dark_field=True, yn_augment=True,
+                                                 yn_split=True, yn_split_balance=True, max_num_seg=48)
+    data_train_TNBC_processed = process_data(data_train_TNBC, yn_flip_dark_field=True, yn_augment=True,
+                                                 yn_split=True, yn_split_balance=True, max_num_seg=24)
 
+    print(len(data_train_official_processed), len(data_train_Amit_processed), len(data_train_TNBC_processed))
+
+    data_train_processed = {**data_train_official_processed, **data_train_Amit_processed, **data_train_TNBC_processed}
+
+    print(len(data_train_processed))
 ##
 """ create mrcnn class for using the model """
 
@@ -307,7 +319,7 @@ elif init_with == "last":
 
 model.train(dataset_train, dataset_val,
             learning_rate=config.LEARNING_RATE,
-            epochs=5,
+            epochs=10,
             layers='heads')
 
 model.train(dataset_train, dataset_val,
@@ -343,7 +355,7 @@ model_path = model.find_last()[1]
 
 # specify model path
 # model_path = os.path.join(ROOT_DIR, 'mrcnn_logs',
-#                           'nuclei20180406T0244_bbox_extend_boulder',
+#                           'nuclei20180406T1458_bbox_bug_fix',
 #                           "mask_rcnn_nuclei_0015.h5")
 
 # Load trained weights (fill in path to trained weights here)
@@ -360,7 +372,11 @@ image_id = random.choice(list(data_test.keys()))
 # image_id = '0f1f896d9ae5a04752d3239c690402c022db4d72c0d2c087d73380896f72c466'  # purple
 # image_id = '432f367a4c5b5674de2e2977744d10289a064e5704b21af6607b4975be47c580'   # many cells
 # image_id = '4f949bd8d914bbfa06f40d6a0e2b5b75c38bf53dbcbafc48c97f105bee4f8fac'  # dim cells
+# image_id = '295682d9eb5acb5c1976a460c085734bfaf38482b0a3f02591c2bfdcd4128549'
 image = data_test[image_id]['image']
+
+# image_id = random.choice(list(data_train.keys()))
+# image = data_train[image_id]['image']
 
 
 def image_dn(image=image):
@@ -387,17 +403,20 @@ def remove_outlier(image, mask3D, score=None):
             score = np.ones(n)
         mask_size = np.sqrt(np.sum(mask3D, axis=(0, 1)))
         image_bw = np.mean(image, axis=2)
-        mask_lumi = np.array([np.mean(np.average(image_bw, weights=mask3D[:, :, i])) for i in range(mask3D.shape[2])])
+        mask_lumi = np.array([np.mean(np.average(image_bw, weights=mask3D[:, :, i])) for i in range(n)])
+        back_lumi = np.mean(image_bw[np.sum(mask3D, axis=2) < 1])
 
-        size_mean, size_std = np.sqrt(mean_std_weighted(mask_size**2, score**2))
-        lumi_mean, lumi_std = mean_std_weighted(mask_lumi, score**2)
+        yn_keep = (score > 0.7) & (mask_size > 4)
+        size_mean, size_std = mean_std_weighted(mask_size[yn_keep], score[yn_keep])
+        lumi_mean, lumi_std = mean_std_weighted(mask_lumi[yn_keep], score[yn_keep])
 
         z_size = (mask_size - size_mean) / size_std
-        back_lumi = np.mean(image_bw[np.sum(mask3D, axis=2)<1])
-        z_lumi = (mask_lumi - lumi_mean) / lumi_std
-        yn_keep = (score > 0.7) & (np.abs(z_size) < 3.5) & (mask_size>3) \
-                  & (((lumi_mean-back_lumi)*z_lumi>0) | (np.abs(z_lumi) < 3)) & ((mask_lumi-back_lumi)*(lumi_mean-back_lumi)>0)
 
+        # yn_keep = (score > 0.7) & (np.abs(z_size) < 3.5) & (mask_size > 4) \
+        #           & (((lumi_mean-back_lumi)*z_lumi>0) | (np.abs(z_lumi) < 3)) & ((mask_lumi-back_lumi)*(lumi_mean-back_lumi)>0)
+
+        yn_keep = yn_keep & np.logical_not(np.abs(z_size) > 3.5) \
+                  & (np.abs(mask_lumi-back_lumi)*4 > np.abs(mask_lumi-lumi_mean))
         return yn_keep
     else:
         return np.ones(n, dtype='bool')
@@ -435,7 +454,7 @@ def remove_overlap(mask3D, labels=None):
     return mask3D_res
 
 
-def extend_boundary(image, mask, max_pixel=1, model='all'):
+def extend_boundary(image, mask, max_pixel=1, model='none'):
     if model=='all':
         conv_filter = np.ones([2*max_pixel+1,2*max_pixel+1])
         for i in range(mask.shape[2]):
@@ -538,7 +557,7 @@ def plot_detection_result(image, mask3D, size_seg=0, mask_size=0, score=None):
 
 def gen_mask_by_seg_iter(image=image, size_seg_ini=512, flag_plot=False, flag_use_dn=False):
 
-    amplification_best = 16   # 12
+    amplification_best = 14   # 12
 
     mask_stitched = None
     mask_size = 50
@@ -548,7 +567,7 @@ def gen_mask_by_seg_iter(image=image, size_seg_ini=512, flag_plot=False, flag_us
         if flag_plot:
             plot_detection_result(image, mask_stitched, size_seg, mask_size, score_stitched)
         size_seg_new = utils.floor_pow2(mask_size * amplification_best)  # int(mask_size * amplification_best)
-        size_seg_new = max(size_seg_new, 64)
+        size_seg_new = max(size_seg_new, 96)
         if not(np.isfinite(mask_size)) or size_seg_new == size_seg:
             break
         else:
@@ -577,13 +596,32 @@ def gen_mask_by_mask_number_iter(image, size_seg_ini=512, ideal_num_mask=50, fla
 
     return mask_stitched, score_stitched, size_seg, mask_size
 
+
+
 mask_stitched, score_stitched, size_seg, mask_size = gen_mask_by_seg_iter(image=image, size_seg_ini=256, flag_plot=True, flag_use_dn=True)
 plt.show()
 
 # mask_stitched, score_stitched, size_seg, mask_size = gen_mask_by_mask_number_iter(image=image, size_seg_ini=512, ideal_num_mask=20, flag_plot=True, flag_use_dn=True)
 # plt.show()
 
-
+mask_pred = mask_stitched
+mask_true = utils.mask_2Dto3D(data_train[image_id]['mask'])
+plt.figure(figsize=(8, 8))
+plt.subplot(2,2,1)
+plt.imshow(image)
+plt.axis('off')
+plt.subplot(2,2,2)
+plt.imshow(utils.gen_mask_contour(mask_pred, mask_true, image))
+plt.title('r: pred, g: groud truth')
+plt.axis('off')
+plt.subplot(2,2,3)
+utils.plot_mask2D(utils.mask_3Dto2D(mask_pred))
+plt.title('predict')
+plt.axis('off')
+plt.subplot(2,2,4)
+utils.plot_mask2D(utils.mask_3Dto2D(mask_true))
+plt.axis('off')
+plt.title('groud truth')
 
 
 ##

@@ -235,17 +235,50 @@ def plot_img_and_mask_from_dict(dict_data, id_to_plot=None):
         masks = dict_data[id_to_plot]['mask']
         h_ax_sub = add_sub_axes(h_axes=h_ax, loc='right', size=0.5, gap=0)
         plt.axes(h_ax_sub)
-        # plt.imshow(img)
-        list_mask_colors = np.random.rand(len(masks), 3)
-        list_mask_colors = np.append(list_mask_colors, [[0.9]]*len(masks), axis=1)
-        for i in range(masks.max()):
-            mask = (masks == i+1)*255
-            mask_to_plot = (mask[:, :, None]*list_mask_colors[i][None, None, :]).astype('uint8')
-            plt.imshow(mask_to_plot)
+        plot_mask2D(masks)
+        # list_mask_colors = np.random.rand(len(masks), 3)
+        # list_mask_colors = np.append(list_mask_colors, [[0.9]]*len(masks), axis=1)
+        # for i in range(masks.max()):
+        #     mask = (masks == i+1)*255
+        #     mask_to_plot = (mask[:, :, None]*list_mask_colors[i][None, None, :]).astype('uint8')
+        #     plt.imshow(mask_to_plot)
         plt.axis('image')
         plt.xticks([])
         plt.yticks([])
         plt.title(masks.max(), fontsize='x-small')
+
+
+def get_contour(mask3D, edge=3):
+    """ generate 2D array of mask contour """
+    mask_contour = np.zeros(mask3D.shape[:2])
+    for i in range(mask3D.shape[2]):
+        mask_contour += mask3D[:, :, i] - ndimage.binary_erosion(mask3D[:, :, i], iterations=edge)
+    return mask_contour
+
+
+def gen_mask_contour(mask_pred=None, mask_true=None, image=None):
+
+    img_shape = [0, 0]
+    if mask_pred is None:
+        img_shape = mask_true.shape[:2]
+    else:
+        img_shape = mask_pred.shape[:2]
+
+    if image is None:
+        contour_compare = np.zeros(img_shape+(3, ))
+    else:
+        contour_compare = image*1.0
+
+    if mask_pred is not None:   # pred in red
+        contour_compare[:, :, 0] += get_contour(mask_true) * 255
+        contour_compare[:, :, 2] -= get_contour(mask_true) * 255
+    if mask_true is not None:   # true in green
+        contour_compare[:, :, 1] += get_contour(mask_pred) * 255
+        contour_compare[:, :, 2] -= get_contour(mask_pred) * 255
+
+    contour_compare = np.clip(contour_compare, 0, 255).astype('uint8')
+
+    return contour_compare
 
 
 """ ========== image manipulation  ========== """
