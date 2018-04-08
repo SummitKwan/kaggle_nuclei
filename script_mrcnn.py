@@ -183,6 +183,8 @@ if True:
     data_train_processed = {**data_train_official_processed, **data_train_Amit_processed, **data_train_TNBC_processed}
 
     print(len(data_train_processed))
+
+
 ##
 """ create mrcnn class for using the model """
 
@@ -313,6 +315,9 @@ elif init_with == "last":
     # Load the last model you trained and continue training
     model.load_weights(model.find_last()[1], by_name=True)
 
+# use specific
+# model.load_weights(os.path.join(MODEL_DIR,
+#                                 'nuclei20180407T2107', 'mask_rcnn_nuclei_0013.h5'), by_name=True)
 
 ##
 """  Training """
@@ -329,7 +334,7 @@ model.train(dataset_train, dataset_val,
 
 model.train(dataset_train, dataset_val,
             learning_rate=config.LEARNING_RATE / 10,
-            epochs=15,
+            epochs=30,
             layers="all")
 
 ## Validate
@@ -357,6 +362,11 @@ model_path = model.find_last()[1]
 # model_path = os.path.join(ROOT_DIR, 'mrcnn_logs',
 #                           'nuclei20180406T1458_bbox_bug_fix',
 #                           "mask_rcnn_nuclei_0015.h5")
+model_path = os.path.join(ROOT_DIR, 'mrcnn_logs',
+                          'nuclei20180407T1423_train_with_external_data',
+                          "mask_rcnn_nuclei_0010.h5")
+
+
 
 # Load trained weights (fill in path to trained weights here)
 assert model_path != "", "Provide path to trained weights"
@@ -454,15 +464,6 @@ def remove_overlap(mask3D, labels=None):
     return mask3D_res
 
 
-def extend_boundary(image, mask, max_pixel=1, model='none'):
-    if model=='all':
-        conv_filter = np.ones([2*max_pixel+1,2*max_pixel+1])
-        for i in range(mask.shape[2]):
-            mask[:,:,i] = sp.signal.convolve2d(mask[:,:,i],conv_filter,'same')
-
-    return mask
-
-
 def post_process(image, mask, score, flag_plot=False):
     yn_keep = np.zeros(mask.shape[2])
 
@@ -470,8 +471,6 @@ def post_process(image, mask, score, flag_plot=False):
     yn_keep_from_outlier = remove_outlier(image, mask, score)
     ID_yn_keep_from_outlier = np.where(yn_keep_from_outlier)[0]
 
-    # extend boundary:
-    # mask = extend_boundary(image,mask,max_pixel=1,model='none')
     mask_cleaned = mask[:, :, yn_keep_from_outlier]
     score_cleaned = score[yn_keep_from_outlier]
 
@@ -557,7 +556,7 @@ def plot_detection_result(image, mask3D, size_seg=0, mask_size=0, score=None):
 
 def gen_mask_by_seg_iter(image=image, size_seg_ini=512, flag_plot=False, flag_use_dn=False):
 
-    amplification_best = 14   # 12
+    amplification_best = 16   # 12
 
     mask_stitched = None
     mask_size = 50
@@ -640,7 +639,7 @@ os.mkdir(path_cur_detection_result_figs)
 flag_isinteractive = plt.isinteractive()
 plt.ioff()
 
-data_to_use_type = 'test'  # or 'test'
+data_to_use_type = 'train'  # or 'test'
 if data_to_use_type == 'train':
     data_to_use = data_train
 else:
