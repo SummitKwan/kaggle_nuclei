@@ -121,7 +121,30 @@ with open(path_dict_data, 'rb') as f:
 
 
 
-""" use external dataset """
+""" use external dataset: data fix """
+
+dict_ids = gen_id_path_dict('./data/stage1_train_fix')
+
+dict_data = {}
+for id_img in tqdm(dict_ids):
+    img = ndimage.imread(dict_ids[id_img]['images'][0])[:, :, :3]
+    list_masks = [ndimage.imread(mask_file) for mask_file in dict_ids[id_img]['masks']]
+    num_masks = len(list_masks)
+    array_masks = np.zeros(img.shape[:2], dtype='uint16')
+    for i_mask, mask in enumerate(list_masks):
+        array_masks[mask > 0] = i_mask+1
+    dict_data[id_img] = {'image': img, 'mask': array_masks}
+
+path_dict_data = os.path.join('./data', 'data_train_fix.pickle')
+with open(path_dict_data, 'wb') as f:
+    pickle.dump(dict_data, f)
+
+# load from disk
+with open(path_dict_data, 'rb') as f:
+    dict_data = pickle.load(f)
+
+
+""" use external dataset: Amit """
 dict_ids = gen_id_path_dict('./data/Amit_Sethi_processed')
 
 

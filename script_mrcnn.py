@@ -22,7 +22,6 @@ import Mask_RCNN as mrcnn
 
 
 
-
 # os.environ['CUDA_VISIBLE_DEVICES']="0"
 
 """ specify directories """
@@ -162,7 +161,9 @@ data_train_processed = process_data(data_train)
 """ use external data """
 
 if True:
-    with open('./data/data_train.pickle', 'rb') as f:
+    # with open('./data/data_train.pickle', 'rb') as f:
+    #     data_train_official = pickle.load(f)
+    with open('./data/data_train_fix.pickle', 'rb') as f:
         data_train_official = pickle.load(f)
     with open('./data/data_train_Amit.pickle', 'rb') as f:
         data_train_Amit = pickle.load(f)
@@ -174,9 +175,9 @@ if True:
     data_train_official_processed = process_data(data_train_official, yn_flip_dark_field=True, yn_augment=True,
                                                  yn_split=True, yn_split_balance=True, max_num_seg=12)
     data_train_Amit_processed = process_data(data_train_Amit, yn_flip_dark_field=True, yn_augment=True,
-                                                 yn_split=True, yn_split_balance=True, max_num_seg=48)
+                                                 yn_split=True, yn_split_balance=True, max_num_seg=24)  # 48
     data_train_TNBC_processed = process_data(data_train_TNBC, yn_flip_dark_field=True, yn_augment=True,
-                                                 yn_split=True, yn_split_balance=True, max_num_seg=24)
+                                                 yn_split=True, yn_split_balance=True, max_num_seg=12)  # 24
 
     print(len(data_train_official_processed), len(data_train_Amit_processed), len(data_train_TNBC_processed))
 
@@ -199,7 +200,7 @@ class NucleiConfig(mrcnn.config.Config):
     # Train on 1 GPU and 8 images per GPU. We can put multiple images on each
     # GPU because the images are small. Batch size is 8 (GPUs * images/GPU).
     GPU_COUNT = 1
-    IMAGES_PER_GPU = 4
+    IMAGES_PER_GPU = 1 # 4
 
     # Number of classes (including background)
     NUM_CLASSES = 1 + 1  # background + 2 foreground
@@ -243,7 +244,7 @@ class NucleiDataset(mrcnn.utils.Dataset):
             self.add_class("nuclei", 1, "dark")
             self.add_class("nuclei", 2, "bright")
         else:
-            self.add_class("nuclei", 2, "all")
+            self.add_class("nuclei", 1, "all")
         for i, key in enumerate(data_dict):
             self.add_image('nuclei', i, key)
 
@@ -269,7 +270,7 @@ class NucleiDataset(mrcnn.utils.Dataset):
 """ prepare for model dataset """
 
 
-proportion_val = 0.2
+proportion_val = 0.1
 keys_data = list(data_train_processed.keys())
 keys_data_shuffle =  random.sample(keys_data, k=len(keys_data))
 
@@ -301,7 +302,7 @@ dataset_val.prepare()
 
 model = mrcnn.model.MaskRCNN(mode="training", config=config,
                           model_dir=MODEL_DIR)
-init_with = "last"  # imagenet, coco, or last
+init_with = "specific"  # imagenet, coco, last, or specific
 if init_with == "imagenet":
     model.load_weights(model.get_imagenet_weights(), by_name=True)
 elif init_with == "coco":
@@ -314,17 +315,19 @@ elif init_with == "coco":
 elif init_with == "last":
     # Load the last model you trained and continue training
     model.load_weights(model.find_last()[1], by_name=True)
-
-# use specific
-# model.load_weights(os.path.join(MODEL_DIR,
-#                                 'nuclei20180407T2107', 'mask_rcnn_nuclei_0013.h5'), by_name=True)
+elif init_with == "specific":
+    # use specific
+    # model.load_weights(os.path.join(MODEL_DIR,
+    #                                 'starting_point', '20180406T1458e0015.h5'), by_name=True)
+    model.load_weights(os.path.join(MODEL_DIR,
+                                    'nuclei20180409T0200', 'mask_rcnn_nuclei_0015.h5'), by_name=True)
 
 ##
 """  Training """
 
 model.train(dataset_train, dataset_val,
             learning_rate=config.LEARNING_RATE,
-            epochs=10,
+            epochs=5,
             layers='heads')
 
 model.train(dataset_train, dataset_val,
@@ -334,11 +337,12 @@ model.train(dataset_train, dataset_val,
 
 model.train(dataset_train, dataset_val,
             learning_rate=config.LEARNING_RATE / 10,
-            epochs=30,
+            epochs=25,
             layers="all")
 
-## Validate
-""" validate """
+
+## Test
+""" model prediction """
 
 image_per_GPU = 1
 
@@ -362,10 +366,15 @@ model_path = model.find_last()[1]
 # model_path = os.path.join(ROOT_DIR, 'mrcnn_logs',
 #                           'nuclei20180406T1458_bbox_bug_fix',
 #                           "mask_rcnn_nuclei_0015.h5")
+# model_path = os.path.join(ROOT_DIR, 'mrcnn_logs',
+#                           'nuclei20180407T1423_train_with_external_data',
+#                           "mask_rcnn_nuclei_0010.h5")
+# model_path = os.path.join(ROOT_DIR, 'mrcnn_logs',
+#                           'nuclei20180408T1807',
+#                           "mask_rcnn_nuclei_0040.h5")
 model_path = os.path.join(ROOT_DIR, 'mrcnn_logs',
-                          'nuclei20180407T1423_train_with_external_data',
-                          "mask_rcnn_nuclei_0010.h5")
-
+                          'nuclei20180409T0200',
+                          "mask_rcnn_nuclei_0035.h5")
 
 
 # Load trained weights (fill in path to trained weights here)
@@ -380,9 +389,10 @@ model.load_weights(model_path, by_name=True)
 image_id = random.choice(list(data_test.keys()))
 
 # image_id = '0f1f896d9ae5a04752d3239c690402c022db4d72c0d2c087d73380896f72c466'  # purple
-# image_id = '432f367a4c5b5674de2e2977744d10289a064e5704b21af6607b4975be47c580'   # many cells
+image_id = '432f367a4c5b5674de2e2977744d10289a064e5704b21af6607b4975be47c580'  # many cells
 # image_id = '4f949bd8d914bbfa06f40d6a0e2b5b75c38bf53dbcbafc48c97f105bee4f8fac'  # dim cells
 # image_id = '295682d9eb5acb5c1976a460c085734bfaf38482b0a3f02591c2bfdcd4128549'
+# image_id = '0999dab07b11bc85fb8464fc36c947fbd8b5d6ec49817361cb780659ca805eac'  # blood vessel
 image = data_test[image_id]['image']
 
 # image_id = random.choice(list(data_train.keys()))
@@ -404,32 +414,60 @@ def mean_std_weighted(x, w=None):
     return x_mean, x_std
 
 
+def bound_modified_z(ys, threshold=3.5):
+
+    median_y = np.median(ys)
+    median_absolute_deviation_y = np.median([np.abs(y - median_y) for y in ys])
+    bound_size = threshold * median_absolute_deviation_y / 0.6745
+    # modified_z_scores = [0.6745 * (y - median_y) / median_absolute_deviation_y
+    #                      for y in ys]
+    # np.where(np.abs(modified_z_scores) > threshold)
+    return median_y-bound_size, median_y+bound_size
+
+def bound_iqr(ys, reject_scale=1.8):
+    quartile_1, quartile_3 = np.percentile(ys, (25, 75))
+    iqr = quartile_3 - quartile_1
+    lower_bound = quartile_1 - (iqr * reject_scale)
+    upper_bound = quartile_3 + (iqr * reject_scale)
+    return lower_bound, upper_bound
+
+
 def remove_outlier(image, mask3D, score=None):
     """ filter out outliers: score>0.8, size and luminance within 3 std """
 
     n = mask3D.shape[2]
-    if n > 3:
-        if score is None:
-            score = np.ones(n)
-        mask_size = np.sqrt(np.sum(mask3D, axis=(0, 1)))
+    if score is None:
+        score = np.ones(n)
+    mask_size = np.sqrt(np.sum(mask3D, axis=(0, 1)))
+    yn_keep = (mask_size > 5) & (score > 0.70)
+    if n > 10:
         image_bw = np.mean(image, axis=2)
         mask_lumi = np.array([np.mean(np.average(image_bw, weights=mask3D[:, :, i])) for i in range(n)])
         back_lumi = np.mean(image_bw[np.sum(mask3D, axis=2) < 1])
 
-        yn_keep = (score > 0.7) & (mask_size > 4)
-        size_mean, size_std = mean_std_weighted(mask_size[yn_keep], score[yn_keep])
-        lumi_mean, lumi_std = mean_std_weighted(mask_lumi[yn_keep], score[yn_keep])
-
-        z_size = (mask_size - size_mean) / size_std
+        # size_mean, size_std = mean_std_weighted(mask_size[yn_keep], score[yn_keep])
+        # lumi_mean, lumi_std = mean_std_weighted(mask_lumi[yn_keep], score[yn_keep])
+        #
+        # z_size = (mask_size - size_mean) / size_std
 
         # yn_keep = (score > 0.7) & (np.abs(z_size) < 3.5) & (mask_size > 4) \
         #           & (((lumi_mean-back_lumi)*z_lumi>0) | (np.abs(z_lumi) < 3)) & ((mask_lumi-back_lumi)*(lumi_mean-back_lumi)>0)
 
-        yn_keep = yn_keep & np.logical_not(np.abs(z_size) > 3.5) \
-                  & (np.abs(mask_lumi-back_lumi)*4 > np.abs(mask_lumi-lumi_mean))
-        return yn_keep
-    else:
-        return np.ones(n, dtype='bool')
+        # yn_keep = yn_keep & np.logical_not(np.abs(z_size) > 3.5) \
+        #           & (np.abs(mask_lumi-back_lumi)*4 > np.abs(mask_lumi-lumi_mean))
+
+        if n < 30:
+            threshold_bound_modified_z = 6.0
+        else:
+            threshold_bound_modified_z = 4.0
+
+        bound_size = np.exp(bound_modified_z(np.log(mask_size[yn_keep]), threshold_bound_modified_z))
+        bound_lumi = bound_modified_z(mask_lumi[yn_keep], threshold_bound_modified_z)
+        yn_keep = yn_keep & (mask_size >= bound_size[0]) & (mask_size <= bound_size[1]) \
+                  & (mask_lumi >= bound_lumi[0]) & (mask_lumi <= bound_lumi[1]) \
+                  & (np.abs(mask_lumi-back_lumi)*7 > np.abs(mask_lumi-np.mean(mask_lumi)))
+
+    return yn_keep
 
 
 def remove_overlap(mask3D, labels=None):
@@ -464,33 +502,41 @@ def remove_overlap(mask3D, labels=None):
     return mask3D_res
 
 
-def post_process(image, mask, score, flag_plot=False):
+def post_process(image, mask, score, flag_remove_outlier=True, flag_remove_overlap=True):
+
     yn_keep = np.zeros(mask.shape[2])
 
     # remove outlier:
-    yn_keep_from_outlier = remove_outlier(image, mask, score)
-    ID_yn_keep_from_outlier = np.where(yn_keep_from_outlier)[0]
+    if flag_remove_outlier:
+        yn_keep_from_outlier = remove_outlier(image, mask, score)
+    else:
+        yn_keep_from_outlier = np.ones(len(mask.shape[2]), dtype='bool')
 
+    ID_yn_keep_from_outlier = np.where(yn_keep_from_outlier)[0]
     mask_cleaned = mask[:, :, yn_keep_from_outlier]
     score_cleaned = score[yn_keep_from_outlier]
 
     # remove overlap:
-    mask_cleaned = remove_overlap(mask_cleaned, -score_cleaned)
-    # remove empty mask:
-    yn_keep_from_overlap = np.sum(mask_cleaned, axis=(0, 1)) > 0
-    yn_keep[ID_yn_keep_from_outlier[yn_keep_from_overlap]] = 1
-    yn_keep = yn_keep==1
+    if flag_remove_overlap:
+        mask_cleaned = remove_overlap(mask_cleaned, -score_cleaned)
+        # remove empty mask:
+        yn_keep_from_overlap = np.sum(mask_cleaned, axis=(0, 1)) > 0
+        mask_cleaned = mask_cleaned[:, :, yn_keep_from_overlap]
+        yn_keep[ID_yn_keep_from_outlier[yn_keep_from_overlap]] = 1
+        yn_keep = (yn_keep == 1)
+    else:
+        yn_keep = ID_yn_keep_from_outlier
 
-    return yn_keep, mask
+    return yn_keep, mask_cleaned
 
 
-def gen_mask_by_seg(image=image, size_seg=256, flag_use_dn=False):
+def gen_mask_by_seg(image=image, size_seg=512, flag_use_dn=False):
 
     # flip sign of the dark field images
     if flag_use_dn:
         image = image_dn(image)
 
-    image_segs = utils.img_split(image, size_seg=size_seg, overlap=0.2)
+    image_segs = utils.img_split(image, size_seg=size_seg, overlap=0.4)
 
     # split, cmpute mask, stitch
     mask_segs = {}
@@ -506,121 +552,123 @@ def gen_mask_by_seg(image=image, size_seg=256, flag_use_dn=False):
         scores_segs[loc_seg] = scores_seg
     mask_stitched, _, score_stiched = utils.img_stitch(mask_segs, mode='mask', info_mask_dict=scores_segs)
 
-    # post processing
-    if False:  # filter out mask that is not darker than average
-        pass
+    if mask_stitched.shape[2] != 0:
+        mask_size = np.average(np.sqrt(np.sum(mask_stitched, axis=(0, 1))), weights=score_stiched)
+    else:
+        mask_size = 16.0
 
-    mask_size = np.average(np.sqrt(np.sum(mask_stitched, axis=(0, 1))), weights=score_stiched)
     return mask_stitched, score_stiched, mask_size
 
 
-def plot_detection_result(image, mask3D, size_seg=0, mask_size=0, score=None):
-
-    num_row = 1 if score is None else 2
-    fig_height = 4 if score is None else 8
-    h_fig = plt.figure(figsize=(fig_height, 8))
-
-    plt.subplot(num_row, 2, 1)
-    plt.imshow(image)
-    plt.axis('off')
-    plt.title('{}, size_seg={}'.format(image.shape[:2], size_seg))
-    plt.subplot(num_row, 2, 2)
-    utils.plot_mask2D(utils.mask_3Dto2D(mask3D))
-    plt.axis('off')
-    plt.title('mask_size={:.2f}'.format(mask_size))
-    if score is not None:
-        plt.subplot(2, 2, 3)
-        # yn_keep = remove_outlier(image, mask3D, score)
-        yn_keep, mask3D = post_process(image, mask3D, score)
-        plt.imshow(np.any(mask3D, axis=2).astype('int') + np.any(mask3D[:, :, yn_keep==False], axis=2), vmin=0, vmax=2)
-        plt.axis('off')
-        plt.title('filtered out {}'.format(np.sum(yn_keep==False)))
-
-        try:
-            plt.subplot(6, 2, 8)
-            plt.hist(score, bins=np.arange(0.5, 1.01, 0.02))
-            plt.ylabel('score')
-            plt.subplot(6, 2, 10)
-            mask_size = np.sqrt(np.sum(mask3D, axis=(0, 1)))
-            plt.hist(mask_size, bins=np.linspace(0, mask_size.max(), 20))
-            plt.ylabel('size')
-            plt.subplot(6, 2, 12)
-            image_bw = np.mean(image, axis=2)
-            mask_lum = np.array([np.mean(np.average(image_bw, weights=mask3D[:, :, i])) for i in range(mask3D.shape[2])])
-            plt.hist(mask_lum, bins=20)
-            plt.ylabel('luminance')
-        except:
-            pass
-    return h_fig
-
-
-def gen_mask_by_seg_iter(image=image, size_seg_ini=512, flag_plot=False, flag_use_dn=False):
+def gen_mask_by_seg_iter(image=image, size_seg_ini=512, flag_plot=False, flag_use_dn=True):
 
     amplification_best = 16   # 12
+    amplification_min = 12
+    amplification_max = 20
 
     mask_stitched = None
-    mask_size = 50
     size_seg = size_seg_ini
     for i in range(5):
         mask_stitched, score_stitched, mask_size = gen_mask_by_seg(image, size_seg, flag_use_dn=flag_use_dn)
+        yn_keep_mask, mask_post = post_process(image, mask_stitched, score_stitched,
+                                               flag_remove_outlier=True, flag_remove_overlap=False)
+        num_nuclei = mask_post.shape[2]
+        size_nuclei = np.sqrt(np.sum(mask_post > 0) * 1.0 / num_nuclei)
         if flag_plot:
-            plot_detection_result(image, mask_stitched, size_seg, mask_size, score_stitched)
-        size_seg_new = utils.floor_pow2(mask_size * amplification_best)  # int(mask_size * amplification_best)
-        size_seg_new = max(size_seg_new, 96)
-        if not(np.isfinite(mask_size)) or size_seg_new == size_seg:
+            plot_post_process(image=image, mask_org=mask_stitched, mask_post=mask_post, score=score_stitched,
+                              yn_keep=yn_keep_mask, size_seg=size_seg, mask_size=mask_size)
+        size_seg_new = utils.floor_pow2(size_nuclei * amplification_best)  # int(mask_size * amplification_best)
+        if not(np.isfinite(size_nuclei)) or (size_seg == size_seg_new)\
+                or (amplification_min < size_seg/size_nuclei < amplification_max):
             break
         else:
-            size_seg = size_seg_new
-
+            size_seg = max(size_seg_new, 128)
 
     return mask_stitched, score_stitched, size_seg, mask_size
 
 
-def gen_mask_by_mask_number_iter(image, size_seg_ini=512, ideal_num_mask=50, flag_plot=False, flag_use_dn=False):
+def plot_post_process(image, mask_org, mask_post, size_seg=0, mask_size=0, score=None, yn_keep=None):
 
-    size_seg = size_seg_ini
-    mask_stitched = None
-    for i in range(2):
-        mask_stitched, score_stitched, mask_size = gen_mask_by_seg(image, size_seg, flag_use_dn=flag_use_dn)
-        num_mask = mask_stitched.shape[2]
-        if flag_plot:
-            plot_detection_result(image, mask_stitched, size_seg, mask_size, score_stitched)
-        if num_mask<ideal_num_mask:
-            break
-        else:
-            size_seg = int(size_seg/2)
+    h_fig = plt.figure(figsize=(8, 8))
 
-    # if flag_plot:
-    #     plot_detection_result(image, mask_stitched, size_seg, mask_size, score_stitched)
+    plt.subplot(2, 2, 1)
+    plt.imshow(image)
+    plt.axis('off')
+    plt.title('{}, size_seg={}'.format(image.shape[:2], size_seg))
+    plt.subplot(2, 2, 2)
+    utils.plot_mask2D(utils.mask_3Dto2D(mask_post))
+    plt.axis('off')
+    plt.title('mask_size={:.2f}'.format(mask_size))
 
-    return mask_stitched, score_stitched, size_seg, mask_size
+    plt.subplot(2, 2, 3)
+    mask_org_flat = np.any(mask_org, axis=2)
+    mask_post_flat = np.any(mask_post, axis=2)
+    plt.imshow(0 + mask_org_flat + (mask_org_flat != mask_post_flat), vmin=0, vmax=2)
+    plt.axis('off')
+    plt.title('filtered out {}'.format(np.sum(yn_keep==False)))
+
+    try:
+        plt.subplot(6, 2, 8)
+        plt.hist(score, bins=np.arange(0.5, 1.01, 0.02), alpha=0.5)
+        plt.hist(score[yn_keep], bins=np.arange(0.5, 1.01, 0.02), alpha=0.5)
+        plt.ylabel('score')
+
+        plt.subplot(6, 2, 10)
+        mask_size_org = np.sqrt(np.sum(mask_org, axis=(0, 1)))
+        mask_size_post = np.sqrt(np.sum(mask_post, axis=(0, 1)))
+        plt.hist(mask_size_org, bins=np.linspace(0, mask_size_org.max(), 20), alpha=0.5)
+        plt.hist(mask_size_post, bins=np.linspace(0, mask_size_org.max(), 20), alpha=0.5)
+        plt.ylabel('size')
+
+        plt.subplot(6, 2, 12)
+        image_bw = np.mean(image, axis=2)
+        mask_lum_org = np.array(
+            [np.mean(np.average(image_bw, weights=mask_org[:, :, i])) for i in range(mask_org.shape[2])])
+        mask_lum_post = np.array(
+            [np.mean(np.average(image_bw, weights=mask_post[:, :, i])) for i in range(mask_post.shape[2])])
+        plt.hist(mask_lum_org, bins=np.arange(0, 256, 8), alpha=0.5)
+        plt.hist(mask_lum_post, bins=np.arange(0, 256, 8), alpha=0.5)
+        plt.ylabel('luminance')
+    except:
+        pass
+
+    return h_fig
 
 
+mask_stitched, score_stitched, size_seg, mask_size = gen_mask_by_seg_iter(image=image, size_seg_ini=512,
+                                                                          flag_plot=True, flag_use_dn=True)
+yn_keep_mask, mask_post = post_process(image, mask_stitched, score_stitched)
+plot_post_process(image=image, mask_org=mask_stitched, mask_post=mask_post,
+                  size_seg=size_seg, mask_size=mask_size, score=score_stitched, yn_keep=yn_keep_mask)
 
-mask_stitched, score_stitched, size_seg, mask_size = gen_mask_by_seg_iter(image=image, size_seg_ini=256, flag_plot=True, flag_use_dn=True)
+
+image_detection_in_pixel = np.concatenate((image, image), axis=1)
+image_detection_in_pixel[:, image.shape[1]:, :] = utils.gen_mask_contour(mask_pred=mask_post, mask_true=None, image=image)
+plt.figure()
+plt.imshow(image_detection_in_pixel)
 plt.show()
 
 # mask_stitched, score_stitched, size_seg, mask_size = gen_mask_by_mask_number_iter(image=image, size_seg_ini=512, ideal_num_mask=20, flag_plot=True, flag_use_dn=True)
 # plt.show()
-
-mask_pred = mask_stitched
-mask_true = utils.mask_2Dto3D(data_train[image_id]['mask'])
-plt.figure(figsize=(8, 8))
-plt.subplot(2,2,1)
-plt.imshow(image)
-plt.axis('off')
-plt.subplot(2,2,2)
-plt.imshow(utils.gen_mask_contour(mask_pred, mask_true, image))
-plt.title('r: pred, g: groud truth')
-plt.axis('off')
-plt.subplot(2,2,3)
-utils.plot_mask2D(utils.mask_3Dto2D(mask_pred))
-plt.title('predict')
-plt.axis('off')
-plt.subplot(2,2,4)
-utils.plot_mask2D(utils.mask_3Dto2D(mask_true))
-plt.axis('off')
-plt.title('groud truth')
+if False:
+    mask_pred = mask_stitched
+    mask_true = utils.mask_2Dto3D(data_train[image_id]['mask'])
+    plt.figure(figsize=(8, 8))
+    plt.subplot(2,2,1)
+    plt.imshow(image)
+    plt.axis('off')
+    plt.subplot(2,2,2)
+    plt.imshow(utils.gen_mask_contour(mask_pred, mask_true, image))
+    plt.title('r: pred, g: groud truth')
+    plt.axis('off')
+    plt.subplot(2,2,3)
+    utils.plot_mask2D(utils.mask_3Dto2D(mask_pred))
+    plt.title('predict')
+    plt.axis('off')
+    plt.subplot(2,2,4)
+    utils.plot_mask2D(utils.mask_3Dto2D(mask_true))
+    plt.axis('off')
+    plt.title('groud truth')
 
 
 ##
@@ -639,33 +687,46 @@ os.mkdir(path_cur_detection_result_figs)
 flag_isinteractive = plt.isinteractive()
 plt.ioff()
 
-data_to_use_type = 'train'  # or 'test'
+data_to_use_type = 'test'  # or 'test'
 if data_to_use_type == 'train':
     data_to_use = data_train
 else:
     data_to_use = data_test
 
 
-for image_id in tqdm(data_to_use):
+for i_image, image_id in enumerate(data_to_use):
     image = data_to_use[image_id]['image']
-    mask3D, score, size_seg, mask_size = gen_mask_by_seg_iter(image=image, size_seg_ini=256, flag_plot=False, flag_use_dn=True)
-    # mask3D, score, size_seg, mask_size = gen_mask_by_mask_number_iter(image=image, size_seg_ini=512,
-    #                                                                                   ideal_num_mask=20, flag_plot=True,
-    #                                                                                   flag_use_dn=True)
 
-    # plot
-    h_fig = plot_detection_result(image, mask3D, size_seg, mask_size, score)
-    plt.suptitle(np.mean(image))
-    plt.savefig(os.path.join(path_cur_detection_result_figs, image_id))
-    plt.close('all')
+    print(i_image, image_id)
+
+    tic_pred = time.time()
+    # predict
+    mask3D, score, size_seg, mask_size = gen_mask_by_seg_iter(image=image, size_seg_ini=512,
+                                                                              flag_plot=False, flag_use_dn=True)
+    tic_post = time.time()
+    dur_pred = tic_post - tic_pred
 
     # post process
-    # yn_keep_mask = np.ones(mask3D.shape[2], dtype='bool')
-    # if True:
-    #     yn_keep_mask = remove_outlier(image, mask3D)
-    # mask3D_pp = mask3D[:, :, yn_keep_mask]
-    yn_keep_mask, mask3D_pp = post_process(image,mask3D,score)
-    mask3D_pp = mask3D_pp[:,:,yn_keep_mask]
+    yn_keep_mask, mask3D_pp = post_process(image, mask3D, score)
+
+    tic_plot = time.time()
+    dur_post = tic_plot - tic_post
+
+    # plot
+    plot_post_process(image=image, mask_org=mask3D, mask_post=mask3D_pp,
+                      size_seg=size_seg, mask_size=mask_size, score=score, yn_keep=yn_keep_mask)
+    plt.suptitle(np.mean(image))
+    plt.savefig(os.path.join(path_cur_detection_result_figs, image_id))
+
+    image_detection_in_pixel = np.concatenate((image, image), axis=1)
+    image_detection_in_pixel[:, image.shape[1]:, :] = utils.gen_mask_contour(mask_pred=mask3D_pp, mask_true=None,
+                                                                             image=image)
+    sp.misc.imsave(os.path.join(path_cur_detection_result_figs, 'pixel_{}.png'.format(image_id)), image_detection_in_pixel)
+    plt.close('all')
+
+    tic_finish = time.time()
+    dur_plot = tic_finish - tic_plot
+    print('time: predict={:.4f}, post_processing={:.4f}, plot={:.4f}'.format(dur_pred, dur_post, dur_plot))
 
     data_detection[image_id] = {}
     data_detection[image_id]['image'] = image

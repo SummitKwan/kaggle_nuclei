@@ -267,14 +267,14 @@ def gen_mask_contour(mask_pred=None, mask_true=None, image=None):
     if image is None:
         contour_compare = np.zeros(img_shape+(3, ))
     else:
-        contour_compare = image*1.0
+        contour_compare = image*0.5
 
     if mask_pred is not None:   # pred in red
-        contour_compare[:, :, 0] += get_contour(mask_true) * 255
-        contour_compare[:, :, 2] -= get_contour(mask_true) * 255
-    if mask_true is not None:   # true in green
-        contour_compare[:, :, 1] += get_contour(mask_pred) * 255
+        contour_compare[:, :, 0] += get_contour(mask_pred) * 255
         contour_compare[:, :, 2] -= get_contour(mask_pred) * 255
+    if mask_true is not None:   # true in green
+        contour_compare[:, :, 1] += get_contour(mask_true) * 255
+        contour_compare[:, :, 2] -= get_contour(mask_true) * 255
 
     contour_compare = np.clip(contour_compare, 0, 255).astype('uint8')
 
@@ -513,10 +513,14 @@ def img_stitch(segment_img, mode='image', info_mask_dict=None):
 
                 mask_colloapse_r = np.sum(mask_cur, axis=1)
                 mask_colloapse_c = np.sum(mask_cur, axis=0)
-                mask_size = np.sum(mask_colloapse_r, axis=0)
+                mask_size = np.sum(mask_colloapse_r, axis=0).astype('int')
+
+                mask_size[mask_size == 0] = -1   # prevent zero division error
+                tf_keep_mask = (mask_size > 0)
+
                 mask_center_r = np.sum(np.arange(r_size_seg)[:, None] * mask_colloapse_r, axis=0) / mask_size
                 mask_center_c = np.sum(np.arange(c_size_seg)[:, None] * mask_colloapse_c, axis=0) / mask_size
-                tf_keep_mask = np.ones(len(mask_size), dtype='bool')
+
                 if i_r > 0:
                     tf_keep_mask = tf_keep_mask & (mask_center_r >= r_edge)
                 if i_r < len(r_split) - 1:

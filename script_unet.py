@@ -291,8 +291,8 @@ class PlotLosses(Callback):
             plt.legend(loc='center left')
 
         plt.tight_layout()
-        plt.show()
-        if (self.path_save_train_log_fig is not None) and epoch//5==0:
+        # plt.show()
+        if (self.path_save_train_log_fig is not None) and epoch%5==0:
             plt.savefig(self.path_save_train_log_fig)
 
 
@@ -314,15 +314,15 @@ path_save_train_log_fig = os.path.join(path_unet_weight, 'unet_weight_{}.png'.fo
 
 plot_losses = PlotLosses(figsize=(16, 4), path_save_train_log_fig = path_save_train_log_fig)
 
+plt.ioff()
 model.fit_generator(train_generator, validation_data=test_generator, validation_steps=batch_size/2,
                     steps_per_epoch=len(X_train)/(batch_size*2), epochs=100,
                     callbacks=[plot_losses])
 
-
-
 model_out.save_weights(os.path.join(path_unet_weight, 'unet_weight_{}.h5'.format(time_str)))
-
-
+plt.savefig(os.path.join(path_unet_weight, 'unet_weight_{}.png'.format(time_str)))
+plt.close('all')
+plt.ion()
 
 ##
 """ test """
@@ -345,8 +345,11 @@ plot_image_mask(image=x[0], mask_true=y[0], mask_pred=y_hat[0])
 
 ##
 i = np.random.randint(X_test.shape[0])
-x = X_test
+# x = X_test
+x = X_train
+y_true = Y_train
 y_hat = model_loaded.predict(x, verbose=1)
+
 
 data_detection = {}
 time_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -357,8 +360,8 @@ path_cur_detection_result = os.path.join(DIR_DETECTION_RESULT, time_str)
 os.mkdir(path_cur_detection_result)
 
 plt.ioff()
-for i in range(X_test.shape[0]):
-    plot_image_mask(image=x[i], mask_pred=y_hat[i])
+for i in range(x.shape[0]):
+    plot_image_mask(image=x[i], mask_pred=y_hat[i], mask_true=y_true[i])
     plt.savefig( os.path.join(path_cur_detection_result, '{}.png'.format(i)))
     plt.close()
 plt.ion()
