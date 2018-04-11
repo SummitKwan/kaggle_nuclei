@@ -245,7 +245,7 @@ def plot_img_and_mask_from_dict(dict_data, id_to_plot=None):
         plt.axis('image')
         plt.xticks([])
         plt.yticks([])
-        plt.title(masks.max(), fontsize='x-small')
+        plt.title(len(np.unique(masks))-1, fontsize='x-small')
 
 
 def get_contour(mask3D, edge=3):

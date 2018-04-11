@@ -22,7 +22,7 @@ import Mask_RCNN as mrcnn
 
 
 
-# os.environ['CUDA_VISIBLE_DEVICES']="0"
+# os.environ['CUDA_VISIBLE_DEVICES']="1"
 
 """ specify directories """
 
@@ -189,6 +189,8 @@ if True:
 ##
 """ create mrcnn class for using the model """
 
+yn_mean_pixel_use_255 = False
+
 class NucleiConfig(mrcnn.config.Config):
     """Configuration for training on the toy shapes dataset.
     Derives from the base Config class and overrides values specific
@@ -200,10 +202,14 @@ class NucleiConfig(mrcnn.config.Config):
     # Train on 1 GPU and 8 images per GPU. We can put multiple images on each
     # GPU because the images are small. Batch size is 8 (GPUs * images/GPU).
     GPU_COUNT = 1
-    IMAGES_PER_GPU = 1 # 4
+    IMAGES_PER_GPU = 4 # 4
 
     # Number of classes (including background)
     NUM_CLASSES = 1 + 1  # background + 2 foreground
+
+    if yn_mean_pixel_use_255:
+        # mean RGB value, for flipped images (bright field), use 255
+        MEAN_PIXEL = np.array([255.0, 255.0, 255.0])
 
     # Use small images for faster training. Set the limits of the small side
     # the large side, and that determines the image shape.
@@ -280,10 +286,6 @@ keys_val   = keys_data_shuffle[num_train:]
 
 
 dataset_train = NucleiDataset()
-dataset_train.add_data_dict(data_train_processed)
-dataset_train.prepare()
-
-dataset_train = NucleiDataset()
 dataset_train.add_data_dict({key:data_train_processed[key] for key in keys_train})
 dataset_train.prepare()
 
@@ -319,26 +321,32 @@ elif init_with == "specific":
     # use specific
     # model.load_weights(os.path.join(MODEL_DIR,
     #                                 'starting_point', '20180406T1458e0015.h5'), by_name=True)
+    # model.load_weights(os.path.join(MODEL_DIR,
+    #                                 'nuclei20180409T0200', 'mask_rcnn_nuclei_0015.h5'), by_name=True)
+    # model.load_weights(os.path.join(MODEL_DIR,
+    #                                 'nuclei20180410T2030', 'mask_rcnn_nuclei_0015.h5'), by_name=True)
     model.load_weights(os.path.join(MODEL_DIR,
-                                    'nuclei20180409T0200', 'mask_rcnn_nuclei_0015.h5'), by_name=True)
+                                    'nuclei20180410T1310', 'mask_rcnn_nuclei_0029.h5'), by_name=True)
 
 ##
 """  Training """
 
 model.train(dataset_train, dataset_val,
             learning_rate=config.LEARNING_RATE,
-            epochs=5,
+            epochs=10,
             layers='heads')
 
 model.train(dataset_train, dataset_val,
-            learning_rate=config.LEARNING_RATE,
-            epochs=15,
+            learning_rate=config.LEARNING_RATE/8,
+            epochs=40,
             layers='4+')
 
-model.train(dataset_train, dataset_val,
-            learning_rate=config.LEARNING_RATE / 10,
-            epochs=25,
-            layers="all")
+
+
+# model.train(dataset_train, dataset_val,
+#             learning_rate=config.LEARNING_RATE / 10,
+#             epochs=25,
+#             layers="all")
 
 
 ## Test
@@ -372,9 +380,16 @@ model_path = model.find_last()[1]
 # model_path = os.path.join(ROOT_DIR, 'mrcnn_logs',
 #                           'nuclei20180408T1807',
 #                           "mask_rcnn_nuclei_0040.h5")
+# model_path = os.path.join(ROOT_DIR, 'mrcnn_logs',
+#                           'nuclei20180409T0200',
+#                           "mask_rcnn_nuclei_0035.h5")
+# model_path = os.path.join(ROOT_DIR, 'mrcnn_logs',
+#                           'nuclei20180410T1310',
+#                           "mask_rcnn_nuclei_0029.h5")
 model_path = os.path.join(ROOT_DIR, 'mrcnn_logs',
-                          'nuclei20180409T0200',
-                          "mask_rcnn_nuclei_0035.h5")
+                          'nuclei20180406T1458_bbox_bug_fix',
+                          "mask_rcnn_nuclei_0015.h5")
+
 
 
 # Load trained weights (fill in path to trained weights here)
@@ -389,7 +404,7 @@ model.load_weights(model_path, by_name=True)
 image_id = random.choice(list(data_test.keys()))
 
 # image_id = '0f1f896d9ae5a04752d3239c690402c022db4d72c0d2c087d73380896f72c466'  # purple
-image_id = '432f367a4c5b5674de2e2977744d10289a064e5704b21af6607b4975be47c580'  # many cells
+# image_id = '432f367a4c5b5674de2e2977744d10289a064e5704b21af6607b4975be47c580'  # many cells
 # image_id = '4f949bd8d914bbfa06f40d6a0e2b5b75c38bf53dbcbafc48c97f105bee4f8fac'  # dim cells
 # image_id = '295682d9eb5acb5c1976a460c085734bfaf38482b0a3f02591c2bfdcd4128549'
 # image_id = '0999dab07b11bc85fb8464fc36c947fbd8b5d6ec49817361cb780659ca805eac'  # blood vessel
@@ -439,7 +454,7 @@ def remove_outlier(image, mask3D, score=None):
     if score is None:
         score = np.ones(n)
     mask_size = np.sqrt(np.sum(mask3D, axis=(0, 1)))
-    yn_keep = (mask_size > 5) & (score > 0.70)
+    yn_keep = (mask_size > 3) & (score > 0.70)
     if n > 10:
         image_bw = np.mean(image, axis=2)
         mask_lumi = np.array([np.mean(np.average(image_bw, weights=mask3D[:, :, i])) for i in range(n)])
@@ -456,16 +471,16 @@ def remove_outlier(image, mask3D, score=None):
         # yn_keep = yn_keep & np.logical_not(np.abs(z_size) > 3.5) \
         #           & (np.abs(mask_lumi-back_lumi)*4 > np.abs(mask_lumi-lumi_mean))
 
-        if n < 30:
-            threshold_bound_modified_z = 6.0
+        if n < 48:
+            threshold_bound_modified_z = 8.0
         else:
-            threshold_bound_modified_z = 4.0
+            threshold_bound_modified_z = 6.0
 
         bound_size = np.exp(bound_modified_z(np.log(mask_size[yn_keep]), threshold_bound_modified_z))
         bound_lumi = bound_modified_z(mask_lumi[yn_keep], threshold_bound_modified_z)
         yn_keep = yn_keep & (mask_size >= bound_size[0]) & (mask_size <= bound_size[1]) \
                   & (mask_lumi >= bound_lumi[0]) & (mask_lumi <= bound_lumi[1]) \
-                  & (np.abs(mask_lumi-back_lumi)*7 > np.abs(mask_lumi-np.mean(mask_lumi)))
+                  & (np.abs(mask_lumi-back_lumi)*4 > np.abs(mask_lumi-np.mean(mask_lumi)))
 
     return yn_keep
 
@@ -530,7 +545,7 @@ def post_process(image, mask, score, flag_remove_outlier=True, flag_remove_overl
     return yn_keep, mask_cleaned
 
 
-def gen_mask_by_seg(image=image, size_seg=512, flag_use_dn=False):
+def gen_mask_by_seg(image=image, size_seg=512, flag_use_dn=True):
 
     # flip sign of the dark field images
     if flag_use_dn:
@@ -562,9 +577,9 @@ def gen_mask_by_seg(image=image, size_seg=512, flag_use_dn=False):
 
 def gen_mask_by_seg_iter(image=image, size_seg_ini=512, flag_plot=False, flag_use_dn=True):
 
-    amplification_best = 16   # 12
-    amplification_min = 12
-    amplification_max = 20
+    amplification_best = 12   # 12
+    amplification_min = 10
+    amplification_max = 14
 
     mask_stitched = None
     size_seg = size_seg_ini
@@ -582,7 +597,7 @@ def gen_mask_by_seg_iter(image=image, size_seg_ini=512, flag_plot=False, flag_us
                 or (amplification_min < size_seg/size_nuclei < amplification_max):
             break
         else:
-            size_seg = max(size_seg_new, 128)
+            size_seg = max(size_seg_new, 64)
 
     return mask_stitched, score_stitched, size_seg, mask_size
 
@@ -605,7 +620,8 @@ def plot_post_process(image, mask_org, mask_post, size_seg=0, mask_size=0, score
     mask_post_flat = np.any(mask_post, axis=2)
     plt.imshow(0 + mask_org_flat + (mask_org_flat != mask_post_flat), vmin=0, vmax=2)
     plt.axis('off')
-    plt.title('filtered out {}'.format(np.sum(yn_keep==False)))
+    # plt.title('filtered out {}'.format(np.sum(yn_keep==False)))
+    plt.title('n_orig={}, n_post={}'.format(mask_org.shape[2], mask_post.shape[2]))
 
     try:
         plt.subplot(6, 2, 8)
@@ -719,6 +735,8 @@ for i_image, image_id in enumerate(data_to_use):
     plt.savefig(os.path.join(path_cur_detection_result_figs, image_id))
 
     image_detection_in_pixel = np.concatenate((image, image), axis=1)
+
+    # mask_true = utils.mask_2Dto3D(data_to_use[image_id]['mask'])
     image_detection_in_pixel[:, image.shape[1]:, :] = utils.gen_mask_contour(mask_pred=mask3D_pp, mask_true=None,
                                                                              image=image)
     sp.misc.imsave(os.path.join(path_cur_detection_result_figs, 'pixel_{}.png'.format(image_id)), image_detection_in_pixel)
@@ -726,7 +744,7 @@ for i_image, image_id in enumerate(data_to_use):
 
     tic_finish = time.time()
     dur_plot = tic_finish - tic_plot
-    print('time: predict={:.4f}, post_processing={:.4f}, plot={:.4f}'.format(dur_pred, dur_post, dur_plot))
+    print('time: (predict, post_processing, plot) = {:.4f}, ={:.4f}, ={:.4f}'.format(dur_pred, dur_post, dur_plot))
 
     data_detection[image_id] = {}
     data_detection[image_id]['image'] = image
@@ -746,7 +764,8 @@ else:
 mask_ImageId = []
 mask_EncodedPixels = []
 for image_id in data_detection:
-    mask_no_overlap = utils.mask_2Dto3D(utils.mask_3Dto2D(data_detection[image_id]['mask3D']))
+    # mask_no_overlap = utils.mask_2Dto3D(utils.mask_3Dto2D(data_detection[image_id]['mask3D']))
+    mask_no_overlap = data_detection[image_id]['mask3D']
     for i_mask in range(mask_no_overlap.shape[2]):
         mask_ImageId.append(image_id)
         mask_EncodedPixels.append(utils.rle_encoding(mask_no_overlap[:, :, i_mask]))
