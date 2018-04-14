@@ -5,8 +5,8 @@ import importlib
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-
-from . import utils
+import random
+import utils
 
 
 
@@ -154,6 +154,51 @@ plt.imshow(utils.mask_3Dto2D(mask_full[0]), cmap='Paired')
 
 
 
+##
+""" image rescale according to nuc size """
+
+ratio_size_nuc_ideal = 16
+id_img = random.choice(list(data_tr.keys()))
 
 
+img_cur = data_tr[id_img]['image']
+mask_cur = data_tr[id_img]['mask']
+
+image_rescale, mask_rescale, rescale_factor = utils.resize_image_mask(img_cur, mask_cur, r_size_img_nuc_ideal=12)
+
+plt.subplot(2, 2, 1)
+plt.imshow(img_cur)
+plt.subplot(2, 2, 2)
+utils.plot_mask2D(mask_cur)
+plt.subplot(2, 2, 3)
+plt.imshow(image_rescale)
+plt.title(rescale_factor)
+plt.subplot(2, 2, 4)
+utils.plot_mask2D(mask_rescale)
+
+##
+""" image load random crop """
+id_img = random.choice(list(data_tr.keys()))
+
+img_cur = data_tr[id_img]['image']
+mask_cur = data_tr[id_img]['mask']
+
+image_crop, mask_crop_3D = utils.load_image_mask_with_random_crop(img_cur, mask_cur, cropsize=256)
+
+
+plt.subplot(2, 2, 1)
+plt.imshow(img_cur)
+plt.subplot(2, 2, 2)
+utils.plot_mask2D(mask_cur)
+plt.subplot(2, 2, 3)
+plt.imshow(image_crop)
+plt.title('crop')
+plt.subplot(2, 2, 4)
+utils.plot_mask2D(utils.mask_3Dto2D(mask_crop_3D))
+
+##
+
+
+
+##
 

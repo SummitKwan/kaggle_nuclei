@@ -9,6 +9,7 @@ import random
 from tqdm import tqdm
 import numpy as np
 import scipy.ndimage as ndimage
+import skimage.transform as imtransform
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
@@ -296,12 +297,9 @@ def segment_mask(mask_unlabeled):
 def mask_2Dto3D(mask_2D):
     """ represent masks in np.array(shape=(N, M, num_masks)), where values are either 0 or 1 """
     labels_mask = np.unique(mask_2D)
-    labels_mask = labels_mask[labels_mask>0]
-    n, m = mask_2D.shape
-    k = len(labels_mask)
-    mask_3D = np.zeros(shape=(n, m, k), dtype='uint8')
-    for i_label, label in enumerate(labels_mask):
-        mask_3D[:, :, i_label] = (mask_2D == label)
+    labels_mask = labels_mask[labels_mask > 0]
+    mask_3D = (mask_2D[:, :, None] == labels_mask[None, None, :])
+
     return mask_3D
 
 
@@ -317,6 +315,27 @@ def mask_3Dto2D(mask_3D, labels=None):
     for i in i_labels[::-1]:
         mask_2D[mask_3D[:, :, i]>0] = i+1
     return mask_2D
+
+
+def load_image_mask_with_random_crop(image, mask2D, cropsize=512):
+    """ load a random patch of image and mask with size no larger than cropsize """
+
+    h, w = image.shape[:2]
+
+    if h > cropsize:
+        h_start = np.random.randint(0, h-cropsize)
+    else:
+        h_start = 0
+
+    if w > cropsize:
+        w_start = np.random.randint(0, w-cropsize)
+    else:
+        w_start = 0
+
+    image_rand_crop = image[h_start:h_start+cropsize, w_start:w_start+cropsize]
+    mask2D_rand_crop = mask2D[h_start:h_start+cropsize, w_start:w_start+cropsize]
+
+    return image_rand_crop, mask_2Dto3D(mask2D_rand_crop)
 
 
 
@@ -401,6 +420,40 @@ def rle_encoding(mask):
 
 
 """ ========== image split and stitch ========== """
+def round_float(x, n_in_1=2):
+    return np.round(1.0*x*n_in_1)/n_in_1
+
+
+def resize_image_mask(image, mask2D, size_nuc_ideal=None, num_nuc_on_edge_ideal=16, size_patch=256,
+                      min_size_nuclei=8, min_rescale_factor=1, max_rescale_factor=8):
+    """
+    rescale image based on the relative size of image and nuclei,
+    so that len_image_edge / len_nuclei is close to  r_size_img_nuc_ideal
+    """
+
+    size_nuclei = np.sqrt(np.sum(mask2D > 0) * 1.0 / (len(np.unique(mask2D))-1))
+    size_image = np.sqrt(np.prod(image.shape[:2]))
+
+    if not(np.isfinite(size_nuclei)) or size_nuclei < min_size_nuclei:   # if nuclei is too small
+        size_nuclei = min_size_nuclei * 1.0
+
+    if size_nuc_ideal is None:
+        size_nuc_ideal = 1.0 * size_patch / num_nuc_on_edge_ideal
+
+    rescale_factor = round_float(1.0 * size_nuc_ideal / size_nuclei)
+
+    rescale_factor = np.clip(rescale_factor, min_rescale_factor, max_rescale_factor)
+
+    if rescale_factor != 1.0:
+        shape_rescale = (np.array(image.shape[:2]) * rescale_factor).astype('int')
+        image_rescale = imtransform.resize(image, shape_rescale, order=1,
+                                           mode="constant", preserve_range=True).astype(image.dtype)
+        mask_rescale = imtransform.resize(mask2D, shape_rescale, order=0,
+                                          mode="constant", preserve_range=True).astype(mask2D.dtype)
+    else:
+        image_rescale, mask_rescale = image, mask2D
+
+    return image_rescale, mask_rescale, rescale_factor
 
 
 def floor_pow2(n, yn_half=True):
