@@ -198,6 +198,21 @@ with open(path_dict_data, 'rb') as f:
     dict_data = pickle.load(f)
 
 
+""" stage2 final test data """
+dict_id_path_test_stage2  = utils.gen_id_path_dict('./data/stage2_test')
+utils.create_data_file(dict_id_path_test_stage2,  'data_test_stage2.pickle')
+
+plt.figure()
+id_img = random.choice(list(data_tt2.keys()))
+utils.plot_img_and_mask_from_dict(data_tt2, id_img)
+print(id_img)
+os.mkdir('./data/stage2_test_images_no_subfolder')
+dst = './data/stage2_test_images_no_subfolder'
+import shutil
+for img_id in dict_id_path_test_stage2:
+    shutil.copy(dict_id_path_test_stage2[img_id]['images'][0], dst)
+
+
 """ visualize example data """
 id_to_plot = np.random.choice(list(dict_ids.keys()))
 
@@ -431,3 +446,31 @@ def rle_encoding(mask):
     return run_lengths
 
 rle_encoding(mask)
+
+
+
+
+""" test image blur """
+import importlib
+importlib.reload(utils)
+
+list_pow_l = []
+list_pow_h = []
+for image_id in data_test:
+    image = data_test[image_id]['image']
+    pow_l, pow_h = utils.noise_detect(image)
+    list_pow_l.append(pow_l)
+    list_pow_h.append(pow_h)
+
+plt.scatter(list_pow_l, list_pow_h, s=1)
+plt.plot([0, 20], [0, 20*0.75])
+##
+image_id = random.choice(list(data_test.keys()))
+image = data_test[image_id]['image']
+pow_l, pow_h = utils.noise_detect(image)
+print('{:.2f}, {:.2f}, {:.2f}'.format(pow_l, pow_h, pow_h/pow_l))
+plt.figure()
+plt.subplot(1,2,1)
+plt.imshow(image)
+plt.subplot(1,2,2)
+plt.imshow(utils.noise_blur(image))

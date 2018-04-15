@@ -9,6 +9,7 @@ import random
 from tqdm import tqdm
 import numpy as np
 import scipy.ndimage as ndimage
+import skimage
 import skimage.transform as imtransform
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -91,17 +92,24 @@ def create_data_file(dict_id_path, filename, filepath=path_data):
 
     dict_data = {}
     for id_img in tqdm(dict_id_path):
-        img = ndimage.imread(dict_id_path[id_img]['images'][0])[:, :, :3]
-        if 'masks' in dict_id_path[id_img]:
-            list_masks = [ndimage.imread(mask_file) for mask_file in dict_id_path[id_img]['masks']]
-            num_masks = len(list_masks)
-            array_masks = np.zeros(img.shape[:2], dtype='uint16')
-            for i_mask, mask in enumerate(list_masks):
-                array_masks[mask > 0] = i_mask+1
-        else:
-            array_masks = np.array([])
-        dict_data[id_img] = {'image': img, 'mask': array_masks}
-
+        try:
+            img = skimage.img_as_ubyte(ndimage.imread(dict_id_path[id_img]['images'][0]))
+            if len(img.shape) == 2:
+                img = np.dstack([img]*3)
+            elif len(img.shape) == 3:
+                img = img[:, :, np.array([0, 1, 2])]
+            if 'masks' in dict_id_path[id_img]:
+                list_masks = [ndimage.imread(mask_file) for mask_file in dict_id_path[id_img]['masks']]
+                num_masks = len(list_masks)
+                array_masks = np.zeros(img.shape[:2], dtype='uint16')
+                for i_mask, mask in enumerate(list_masks):
+                    array_masks[mask > 0] = i_mask+1
+            else:
+                array_masks = np.array([])
+            dict_data[id_img] = {'image': img, 'mask': array_masks}
+        except:
+            print('error when working on {}'.format(id_img))
+            raise
     # save to disk
     path_dict_data = os.path.join(filepath, filename)
     with open(path_dict_data, 'wb') as f:
@@ -116,6 +124,7 @@ def load_data(filename, filepath=path_data):
 
 
 """ ========== data visualization ========== """
+
 
 def add_sub_axes(h_axes=None, loc='top', size=0.25, gap=0.02, sub_rect=None):
     """
@@ -251,6 +260,7 @@ def plot_img_and_mask_from_dict(dict_data, id_to_plot=None):
 
 def get_contour(mask3D, edge=3):
     """ generate 2D array of mask contour """
+    mask3D = mask3D.astype('int')
     mask_contour = np.zeros(mask3D.shape[:2])
     for i in range(mask3D.shape[2]):
         mask_contour += mask3D[:, :, i] - ndimage.binary_erosion(mask3D[:, :, i], iterations=edge)
@@ -422,6 +432,13 @@ def rle_encoding(mask):
 """ ========== image split and stitch ========== """
 def round_float(x, n_in_1=2):
     return np.round(1.0*x*n_in_1)/n_in_1
+
+
+def discretize_float(x, n_in_1=2):
+    if x >= 1:
+        return round_float(x)
+    else:
+        return 1.0/round_float(1.0/x)
 
 
 def resize_image_mask(image, mask2D, size_nuc_ideal=None, num_nuc_on_edge_ideal=16, size_patch=256,
@@ -598,8 +615,22 @@ def img_stitch(segment_img, mode='image', info_mask_dict=None):
         return None
 
 
+""" image pre-processing """
+
+def noise_detect(image):
+    image_bw = np.mean(image, axis=2)
+    img_fft = np.fft.fft2(image_bw)
+    h, w = img_fft.shape
+    img_fft = np.log(np.abs(img_fft[:h//2, :w//2]) ** 2)
+    pow_low = np.mean(img_fft[0:h//16, 0:w//16])
+    pow_high= np.mean(img_fft[h//16*7:h//2, w//16*7:w//2])
+    return pow_low, pow_high
 
 
-
-
+def noise_blur(image, threshold=0.75, std=3):
+    pow_low, pow_high = noise_detect(image)
+    if pow_low * threshold < pow_high:
+        return ndimage.gaussian_filter(image, sigma=std).astype(image.dtype)
+    else:
+        return image
 

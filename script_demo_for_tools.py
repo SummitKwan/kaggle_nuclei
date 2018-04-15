@@ -29,6 +29,7 @@ utils.unzip_data()
 # returns a dictionary of {image_id: {'images': list_of_image_file_path, 'masks': list_of_mask_file_path}}
 dict_id_path_train = utils.gen_id_path_dict('./data/stage1_train')
 dict_id_path_test  = utils.gen_id_path_dict('./data/stage1_test')
+dict_id_path_test_stage2  = utils.gen_id_path_dict('./data/stage2_test')
 
 # ---- 1.4. create a data structure:
 """
@@ -39,13 +40,14 @@ and mask is a (M,N) array, where value 0 represents background and value 1 to nu
 """
 utils.create_data_file(dict_id_path_train, 'data_train.pickle')
 utils.create_data_file(dict_id_path_test,  'data_test.pickle')
-
+utils.create_data_file(dict_id_path_test_stage2,  'data_test_stage2.pickle')
 
 """" ========== 2. load data and visualize data ========== """
 
 # ----- 2.1 load data
 data_tr = utils.load_data('data_train.pickle')
 data_tt = utils.load_data('data_test.pickle')
+data_tt2 = utils.load_data('data_test_stage2.pickle')
 
 # ----- 2.2 plot data from the original file directory
 # plot a random image with masks

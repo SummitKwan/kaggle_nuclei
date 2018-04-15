@@ -4,11 +4,14 @@ import os
 import sys
 import random
 import time
+import warnings
 import numpy as np
 import scipy as sp
 import scipy.ndimage as ndimage
 import pickle
 import copy
+import matplotlib
+matplotlib.use('agg')
 import matplotlib.pyplot as plt
 
 from tqdm import tqdm
@@ -46,6 +49,8 @@ with open('./data/data_train.pickle', 'rb') as f:
     data_train = pickle.load(f)
 with open('./data/data_test.pickle', 'rb') as f:
     data_test = pickle.load(f)
+with open('./data/data_test_stage2.pickle', 'rb') as f:
+    data_test_stage2 = pickle.load(f)
 
 def add_class_to_data_dict(data_dict):
     for key in data_dict:
@@ -389,9 +394,9 @@ model_path = model.find_last()[1]
 model_path = os.path.join(ROOT_DIR, 'mrcnn_logs',
                           'nuclei20180406T1458_bbox_bug_fix',
                           "mask_rcnn_nuclei_0015.h5")
-model_path = os.path.join(ROOT_DIR, 'mrcnn_logs',
-                          'nuclei20180406T2328_more_training',
-                          "mask_rcnn_nuclei_0009.h5")
+# model_path = os.path.join(ROOT_DIR, 'mrcnn_logs',
+#                           'nuclei20180406T2328_more_training',
+#                           "mask_rcnn_nuclei_0009.h5")
 
 
 
@@ -403,6 +408,7 @@ model.load_weights(model_path, by_name=True)
 
 ## plot a random detection result
 """ plot a random detection result """
+data_test = data_test_stage2
 
 image_id = random.choice(list(data_test.keys()))
 
@@ -596,7 +602,7 @@ def gen_mask_by_seg_iter(image=image, size_seg_ini=512, flag_plot=False, flag_us
             plot_post_process(image=image, mask_org=mask_stitched, mask_post=mask_post, score=score_stitched,
                               yn_keep=yn_keep_mask, size_seg=size_seg, mask_size=mask_size)
         size_seg_new = utils.floor_pow2(mask_size * amplification_best)  # int(mask_size * amplification_best)
-        size_seg_new = max(size_seg_new, 96)
+        size_seg_new = max(size_seg_new, 128)
         if not(np.isfinite(mask_size)) or (size_seg == size_seg_new)\
                 or (amplification_min < size_seg/mask_size < amplification_max):
             break
@@ -655,7 +661,7 @@ def plot_post_process(image, mask_org, mask_post, size_seg=0, mask_size=0, score
     return h_fig
 
 
-mask_stitched, score_stitched, size_seg, mask_size = gen_mask_by_seg_iter(image=image, size_seg_ini=256,
+mask_stitched, score_stitched, size_seg, mask_size = gen_mask_by_seg_iter(image=image, size_seg_ini=512,
                                                                           flag_plot=True, flag_use_dn=True)
 yn_keep_mask, mask_post = post_process(image, mask_stitched, score_stitched)
 plot_post_process(image=image, mask_org=mask_stitched, mask_post=mask_post,
@@ -707,53 +713,61 @@ os.mkdir(path_cur_detection_result_figs)
 flag_isinteractive = plt.isinteractive()
 plt.ioff()
 
-data_to_use_type = 'test'  # or 'test'
+data_to_use_type = 'test_stage2'  # or 'test'
 if data_to_use_type == 'train':
     data_to_use = data_train
-else:
+elif data_to_use_type == 'test':
     data_to_use = data_test
+elif data_to_use_type == 'test_stage2':
+    data_to_use = data_test_stage2
 
+# key_example = random.sample(list(data_to_use.keys()), 5)
+# data_to_use = {key: data_to_use[key] for key in key_example}
 
 for i_image, image_id in enumerate(data_to_use):
     image = data_to_use[image_id]['image']
 
-    print(i_image, image_id)
+    print('{}/{},     {}'.format(i_image, len(data_to_use), image_id))
+    try:
+        tic_pred = time.time()
+        # predict
+        mask3D, score, size_seg, mask_size = gen_mask_by_seg_iter(image=image, size_seg_ini=512,
+                                                                                  flag_plot=False, flag_use_dn=True)
+        tic_post = time.time()
+        dur_pred = tic_post - tic_pred
 
-    tic_pred = time.time()
-    # predict
-    mask3D, score, size_seg, mask_size = gen_mask_by_seg_iter(image=image, size_seg_ini=512,
-                                                                              flag_plot=False, flag_use_dn=True)
-    tic_post = time.time()
-    dur_pred = tic_post - tic_pred
+        # post process
+        yn_keep_mask, mask3D_pp = post_process(image, mask3D, score)
 
-    # post process
-    yn_keep_mask, mask3D_pp = post_process(image, mask3D, score)
+        tic_plot = time.time()
+        dur_post = tic_plot - tic_post
 
-    tic_plot = time.time()
-    dur_post = tic_plot - tic_post
+        # plot
+        plot_post_process(image=image, mask_org=mask3D, mask_post=mask3D_pp,
+                          size_seg=size_seg, mask_size=mask_size, score=score, yn_keep=yn_keep_mask)
+        plt.suptitle(np.mean(image))
+        plt.savefig(os.path.join(path_cur_detection_result_figs, image_id))
 
-    # plot
-    plot_post_process(image=image, mask_org=mask3D, mask_post=mask3D_pp,
-                      size_seg=size_seg, mask_size=mask_size, score=score, yn_keep=yn_keep_mask)
-    plt.suptitle(np.mean(image))
-    plt.savefig(os.path.join(path_cur_detection_result_figs, image_id))
+        image_detection_in_pixel = np.concatenate((image, image), axis=1)
 
-    image_detection_in_pixel = np.concatenate((image, image), axis=1)
+        # mask_true = utils.mask_2Dto3D(data_to_use[image_id]['mask'])
+        image_detection_in_pixel[:, image.shape[1]:, :] = utils.gen_mask_contour(mask_pred=mask3D_pp, mask_true=None,
+                                                                                 image=image)
+        sp.misc.imsave(os.path.join(path_cur_detection_result_figs, 'pixel_{}.png'.format(image_id)), image_detection_in_pixel)
+        plt.close('all')
 
-    # mask_true = utils.mask_2Dto3D(data_to_use[image_id]['mask'])
-    image_detection_in_pixel[:, image.shape[1]:, :] = utils.gen_mask_contour(mask_pred=mask3D_pp, mask_true=None,
-                                                                             image=image)
-    sp.misc.imsave(os.path.join(path_cur_detection_result_figs, 'pixel_{}.png'.format(image_id)), image_detection_in_pixel)
-    plt.close('all')
+        tic_finish = time.time()
+        dur_plot = tic_finish - tic_plot
+        print('time: (predict, post_processing, plot) = {:.4f}, ={:.4f}, ={:.4f}'.format(dur_pred, dur_post, dur_plot))
 
-    tic_finish = time.time()
-    dur_plot = tic_finish - tic_plot
-    print('time: (predict, post_processing, plot) = {:.4f}, ={:.4f}, ={:.4f}'.format(dur_pred, dur_post, dur_plot))
+        data_detection[image_id] = {}
+        data_detection[image_id]['image'] = image
+        # data_detection[image_id]['mask3D'] = mask3D_pp
+        data_detection[image_id]['mask2D'] = utils.mask_3Dto2D(mask3D_pp)
+        data_detection[image_id]['size_seg_mask'] = (size_seg, mask_size)
 
-    data_detection[image_id] = {}
-    data_detection[image_id]['image'] = image
-    data_detection[image_id]['mask3D'] = mask3D_pp
-    data_detection[image_id]['size_seg_mask'] = (size_seg, mask_size)
+    except:
+        warnings.warn('error occured for {}'.format(image_id))
 
 with open(os.path.join(path_cur_detection_result, 'data_detection.pickle'), 'wb') as f:
     pickle.dump(data_detection, f)
@@ -769,7 +783,8 @@ mask_ImageId = []
 mask_EncodedPixels = []
 for image_id in data_detection:
     # mask_no_overlap = utils.mask_2Dto3D(utils.mask_3Dto2D(data_detection[image_id]['mask3D']))
-    mask_no_overlap = data_detection[image_id]['mask3D']
+    # mask_no_overlap = data_detection[image_id]['mask3D']
+    mask_no_overlap = utils.mask_2Dto3D(data_detection[image_id]['mask2D'])
     for i_mask in range(mask_no_overlap.shape[2]):
         mask_ImageId.append(image_id)
         mask_EncodedPixels.append(utils.rle_encoding(mask_no_overlap[:, :, i_mask]))
