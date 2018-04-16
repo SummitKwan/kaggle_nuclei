@@ -838,9 +838,246 @@ with open(os.path.join(path_cur_detection_result, 'test.csv'), 'w') as f:
 
 
 ##
+""" ========== fine tuning ========== """
 """ work on the error images """
 keys_missing = list(set(data_to_use.keys()) - set(data_detection.keys()))
 
 print(keys_missing)
 
 
+## plot example input images
+with open('./data/data_test.pickle', 'rb') as f:
+    data_test_stage1 = pickle.load(f)
+with open('./data/data_test_stage2.pickle', 'rb') as f:
+    data_test_stage2 = pickle.load(f)
+
+data_to_use_type = 'test_stage2'  # or 'test'
+if data_to_use_type == 'train':
+    data_to_use = data_train
+elif data_to_use_type == 'test_stage1':
+    data_to_use = data_test_stage1
+elif data_to_use_type == 'test_stage2':
+    data_to_use = data_test_stage2
+
+list_img_shape = []
+list_img_id = []
+for img_id in tqdm(data_to_use):
+    img_shape = data_to_use[img_id]['image'].shape[:2]
+    list_img_shape.append(img_shape)
+    list_img_id.append(img_id)
+array_img_shape = np.array(list_img_shape)
+
+import collections
+collections.Counter(list_img_shape)
+
+##
+""" save img with size_prefix """
+path_to_save_img_by_shape = './figures/stage2_test_img_by_size'
+import shutil
+
+if not(os.path.exists(path_to_save_img_by_shape)):
+    os.mkdir(path_to_save_img_by_shape)
+
+detection_result_from_source = './detection_result/20180415_054202/figs'
+
+for img_id in tqdm(data_to_use):
+    img_cur = data_to_use[img_id]['image']
+    img_shape = img_cur.shape[:2]
+    img_name_with_shape = '{:0>4d}_{:0>4d}_{}'.format(*img_shape, img_id)
+    sp.misc.imsave(os.path.join(path_to_save_img_by_shape, '{}.png'.format(img_name_with_shape)),
+                   img_cur)
+    try:
+        file_from_source = os.path.join(detection_result_from_source, '{}.png'.format(img_id))
+
+        shutil.copyfile(file_from_source,
+                        os.path.join(path_to_save_img_by_shape, '{}_detection.png'.format(img_name_with_shape))
+                        )
+    except:
+        warnings.warn('{} cannot copy'.format(img_id))
+
+
+
+
+##
+""" ===== special cases ===== """
+""" special case to work on 520, 696, small cells """
+
+with open('./data/data_test_stage2.pickle', 'rb') as f:
+    data_test_stage2 = pickle.load(f)
+data_to_use = data_test_stage2
+
+
+# select subset
+size_special = (304, 560)
+data_to_use = {key: data_to_use[key] for key in data_to_use if data_to_use[key]['image'].shape[:2]==size_special}
+
+noise_blur_threshold = 0.75
+noise_blur_std = 3
+if size_special == (574, 574):
+    zoom_ini = 0.100
+    zoom_lim = [0.100, 1.000]
+    flag_use_noise_blur = True
+elif size_special == (520, 696):
+    zoom_ini = 0.5
+    zoom_lim = [0.5, 2.000]
+    flag_use_noise_blur = True
+elif size_special == (304, 560):
+    zoom_ini = 0.25
+    zoom_lim = [0.25, 0.50]
+    flag_use_noise_blur = True
+    noise_blur_threshold = 0.6
+    noise_blur_std = 4
+else:
+    zoom_ini = 0.500
+    zoom_lim = [0.25, 4.0]
+    flag_use_noise_blur = True
+
+data_detection = {}
+time_str = time.strftime("%Y%m%d_%H%M%S") + '_{}_{}'.format(size_special[0], size_special[1])
+DIR_DETECTION_RESULT = './detection_result'
+if not(os.path.exists(DIR_DETECTION_RESULT)):
+    os.mkdir(DIR_DETECTION_RESULT)
+path_cur_detection_result = os.path.join(DIR_DETECTION_RESULT, time_str)
+path_cur_detection_result_figs = os.path.join(path_cur_detection_result, 'figs')
+os.mkdir(path_cur_detection_result)
+os.mkdir(path_cur_detection_result_figs)
+
+
+# key_example = random.sample(list(data_to_use.keys()), 5)
+# data_to_use = {key: data_to_use[key] for key in key_example}
+
+flag_isinteractive = plt.isinteractive()
+plt.ioff()
+
+for i_image, image_id in enumerate(data_to_use):
+
+    # if i_image > 10:
+    #     break
+
+    image = data_to_use[image_id]['image']
+
+    print('{}/{},     {}'.format(i_image, len(data_to_use), image_id))
+    try:
+        tic_pred = time.time()
+
+        if flag_use_noise_blur:
+            image_pre = utils.noise_blur(image, threshold=flag_use_noise_blur, std=noise_blur_std)
+        else:
+            image_pre = image
+
+        # predict
+        mask3D, score, zoom, mask_size = gen_mask_by_zoom_iter(image_pre, zoom_ini=zoom_ini, zoom_lim=zoom_lim,
+                                                               flag_plot=False, flag_use_dn=False)
+
+        tic_post = time.time()
+        dur_pred = tic_post - tic_pred
+
+        # post process
+        yn_keep_mask, mask3D_pp = post_process(image, mask3D, score)
+
+        tic_plot = time.time()
+        dur_post = tic_plot - tic_post
+
+        # plot
+        plot_post_process(image=image, mask_org=mask3D, mask_post=mask3D_pp,
+                          score=score, yn_keep=yn_keep_mask, zoom=zoom, mask_size=mask_size)
+        plt.suptitle(np.mean(image))
+        plt.savefig(os.path.join(path_cur_detection_result_figs, image_id))
+
+        image_detection_in_pixel = np.concatenate((image, image), axis=1)
+
+        # mask_true = utils.mask_2Dto3D(data_to_use[image_id]['mask'])
+        image_detection_in_pixel[:, image.shape[1]:, :] = utils.gen_mask_contour(mask_pred=mask3D_pp, mask_true=None,
+                                                                                 image=image)
+        sp.misc.imsave(os.path.join(path_cur_detection_result_figs, 'pixel_{}.png'.format(image_id)), image_detection_in_pixel)
+        plt.close('all')
+
+        tic_finish = time.time()
+        dur_plot = tic_finish - tic_plot
+        print('time: (predict, post_processing, plot) = {:.4f}, ={:.4f}, ={:.4f}'.format(dur_pred, dur_post, dur_plot))
+
+        data_detection[image_id] = {}
+        data_detection[image_id]['image'] = image
+        # data_detection[image_id]['mask3D'] = mask3D_pp
+        data_detection[image_id]['mask2D'] = utils.mask_3Dto2D(mask3D_pp)
+        data_detection[image_id]['zoom'] = (zoom, mask_size)
+
+    except:
+        warnings.warn('error occured for {}'.format(image_id))
+
+with open(os.path.join(path_cur_detection_result, 'data_detection.pickle'), 'wb') as f:
+    pickle.dump(data_detection, f)
+if flag_isinteractive:
+    plt.ion()
+else:
+    plt.ioff()
+
+
+
+# store encoding result
+mask_ImageId = []
+mask_EncodedPixels = []
+for image_id in data_detection:
+    # mask_no_overlap = utils.mask_2Dto3D(utils.mask_3Dto2D(data_detection[image_id]['mask3D']))
+    # mask_no_overlap = data_detection[image_id]['mask3D']
+    mask_no_overlap = utils.mask_2Dto3D(data_detection[image_id]['mask2D'])
+    for i_mask in range(mask_no_overlap.shape[2]):
+        mask_ImageId.append(image_id)
+        mask_EncodedPixels.append(utils.rle_encoding(mask_no_overlap[:, :, i_mask]))
+
+with open(os.path.join(path_cur_detection_result, 'test.csv'), 'w') as f:
+    f.write('ImageId,EncodedPixels' + "\n")
+    for image_id, rle in zip(mask_ImageId, mask_EncodedPixels):
+        f.write(image_id + ',')
+        f.write(" ".join([str(num) for num in rle]) + "\n")
+    f.close()
+
+
+
+##
+""" combine fine tuned results with original results """
+with open('./data/data_test_stage2.pickle', 'rb') as f:
+    data_test_stage2 = pickle.load(f)
+data_to_use = data_test_stage2
+
+list_img_shape = []
+list_img_id = []
+for img_id in tqdm(data_to_use):
+    img_shape = data_to_use[img_id]['image'].shape[:2]
+    list_img_shape.append(img_shape)
+    list_img_id.append(img_id)
+array_img_shape = np.array(list_img_shape)
+
+import pandas as pd
+path_orig_detection_result = './detection_result/20180415_054202_best_model'
+path_orig_csv = os.path.join(path_orig_detection_result, 'test.csv')
+
+df_orgn = pd.read_csv(path_orig_csv)
+len(df_orgn['ImageId'].unique())
+len(df_orgn)
+
+# remove orignal detection for the refined images
+
+list_img_id_select = [img_id for img_id, img_shape in zip(list_img_id, list_img_shape)
+                      if img_shape in ((574, 574), (304, 560))]
+df_remove_select = df_orgn[~df_orgn['ImageId'].isin(list_img_id_select)]
+
+print( len(df_orgn['ImageId'].unique()), len(df_remove_select['ImageId'].unique()) )
+
+path_refine_detection_result = './detection_result/20180415_152119_574_574'
+path_refine_csv = os.path.join(path_refine_detection_result, 'test.csv')
+df_refine_1 = pd.read_csv(path_refine_csv)
+
+path_refine_detection_result = './detection_result/20180415_174526_304_560'
+path_refine_csv = os.path.join(path_refine_detection_result, 'test.csv')
+df_refine_2 = pd.read_csv(path_refine_csv)
+
+print( len(df_refine_1['ImageId'].unique()), len(df_refine_2['ImageId'].unique()) )
+
+df_final = pd.concat((df_remove_select, df_refine_1, df_refine_2), axis=0 )
+
+print( len(df_final['ImageId'].unique()), len(df_orgn['ImageId'].unique()) )
+print( len(df_final), len(df_orgn) )
+
+path_final_csv = './detection_result/stage2_test_final.csv'
+df_final.to_csv(path_final_csv, index=False)
